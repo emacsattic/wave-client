@@ -26,9 +26,14 @@
            be running (this will change)."}
   (def backend (new ClientBackend user-at-domain server port)))
 
+(defn get-wave-summary [wave]
+  #^{:doc "Get the basic information of a wave: the id and the digest."}
+  {:id (.serialise (.getWaveId wave)) :digest (.getDigest wave)})
+
 (defn get-waves []
   #^{:doc "Get a list of wave beans"}
-  (map bean (seq (ClientUtils/getIndexEntries (.getIndexWave backend)))))
+  (map get-wave-summary
+       (seq (ClientUtils/getIndexEntries (.getIndexWave backend)))))
 
 (defn get-user-id []
   #^{:doc "Get the user info of the current user"}
