@@ -26,12 +26,23 @@
            be running (this will change)."}
   (def backend (new ClientBackend user-at-domain server port)))
 
+(defn get-participants [wave-id]
+  #^{:doc "Get the list of participants from the Wave indentified by
+           WaveId instance WAVE-ID."}
+  (map (fn [participant-id] (.getAddress participant-id))
+       (seq
+        (.getParticipants
+         (ClientUtils/getConversationRoot (.getWave backend wave-id))))))
+
 (defn get-wave-summary [wave]
-  #^{:doc "Get the basic information of a wave: the id and the digest."}
-  {:id (.serialise (.getWaveId wave)) :digest (.getDigest wave)})
+  #^{:doc "Get the basic information of a wave: the id and the digest,
+           and the participants."}
+  {:id (.serialise (.getWaveId wave)) :digest (.getDigest wave)
+   :participants (get-participants (.getWaveId wave))})
 
 (defn get-waves []
-  #^{:doc "Get a list of wave beans"}
+  #^{:doc "Get a list of waves.  Each wave should have info about the id
+           the summary line, and the participants"}
   (map get-wave-summary
        (seq (ClientUtils/getIndexEntries (.getIndexWave backend)))))
 
