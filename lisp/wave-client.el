@@ -124,6 +124,14 @@ This should be the port on which the FedOne server is running."
         (temp-output output))
     ;; Delete the prompts, if there are any
     (setq temp-output (replace-regexp-in-string "^.*=>\s*" "" temp-output))
+    ;; Sometimes there are stray nills around, presumably from our
+    ;; flush statement.  Let's just get rid of those quietly, if
+    ;; there's something else there.
+    (when (string-match "(" temp-output)
+      (setq temp-output
+            (replace-regexp-in-string
+             "\n" ""
+             (replace-regexp-in-string "^nil$" "" temp-output))))
     ;; Delete newlines
     (setq temp-output (replace-regexp-in-string "\n$" "" temp-output))
     (setq wave-client-temp-output
@@ -173,15 +181,30 @@ This should be the port on which the FedOne server is running."
 read in the `read-from-string' method."
   (replace-regexp-in-string "\\(#<.*>\\)" "\"\\1\"" text))
 
+(defun wave-client-clojure-dict-to-alist (text)
+  "If TEXT is a clojure dictionary, transform it
+into an elisp-friendly alist"
+  (let ((newtext text))
+    (while (string-match "{" newtext)
+      (setq newtext
+            (replace-regexp-in-string
+             ":\\(.*?\\) \\(.*?\\)[,)]" "(\\1 . \\2)"
+             ;; note extra paren here, because the replacement above
+             ;; swallows the last one
+             (replace-regexp-in-string
+              "{\\(.*\\)}" "(\\1))" newtext))))
+    newtext))
+
 (defmacro wave-client-eval (&rest rest)
   "Evaluate REST, a quoted s-expression in the FedOne REPL.
 Since the REPL is actually evaluating clojure, the code should
 actually be clojure code."
   `(car (read-from-string
-         (wave-client-escapify-clojure
-          (wave-client-send-and-receive
-           (replace-regexp-in-string "\\\\." "."
-                                     (prin1-to-string ,@rest)))))))
+         (wave-client-clojure-dict-to-alist
+          (wave-client-escapify-clojure
+           (wave-client-send-and-receive
+            (replace-regexp-in-string "\\\\." "."
+                                      (prin1-to-string ,@rest))))))))
 
 (defun wave-client-send-and-receive (text)
   "Send TEXT to the FedOne REPL, and return the text result."
