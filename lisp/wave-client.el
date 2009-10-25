@@ -185,7 +185,7 @@ read in the `read-from-string' method."
   "If TEXT is a clojure dictionary, transform it
 into an elisp-friendly alist"
   (let ((newtext text))
-    (while (string-match "{" newtext)
+    (while (string-match "{:.*}" newtext)
       (setq newtext
             (replace-regexp-in-string
              ":\\(.*?\\) \\(.*?\\)[,)]" "(\\1 . \\2)"
