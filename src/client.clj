@@ -26,6 +26,24 @@
            be running (this will change)."}
   (def backend (new ClientBackend user-at-domain server port)))
 
+(defn clojure-type-dispatch [obj]
+  #^{:doc "Returns the type of common clojure objects. One
+           of (:seq, :map, :default)"}
+  (cond (seq? obj) :seq
+        (map? obj) :map
+        true :default))
+
+(defmulti elispify clojure-type-dispatch)
+
+(defmethod elispify :map [mapobj]
+  (map (fn [pair] `(~(key pair) . ~(val pair))) (seq mapobj)))
+
+(defmethod elispify :seq [seq]
+  seq)
+
+(defmethod elispify :default [obj]
+  obj)
+
 (defn get-participants [wave-id]
   #^{:doc "Get the list of participants from the Wave indentified by
            WaveId instance WAVE-ID."}
@@ -37,8 +55,9 @@
 (defn get-wave-summary [wave]
   #^{:doc "Get the basic information of a wave: the id and the digest,
            and the participants."}
-  {:id (.serialise (.getWaveId wave)) :digest (.getDigest wave)
-   :participants (get-participants (.getWaveId wave))})
+  (elispify {:id (.serialise (.getWaveId wave))
+             :digest (.getDigest wave)
+             :participants (get-participants (.getWaveId wave))}))
 
 (defn get-waves []
   #^{:doc "Get a list of waves.  Each wave should have info about the id

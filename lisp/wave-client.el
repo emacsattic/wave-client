@@ -181,30 +181,16 @@ This should be the port on which the FedOne server is running."
 read in the `read-from-string' method."
   (replace-regexp-in-string "\\(#<.*>\\)" "\"\\1\"" text))
 
-(defun wave-client-clojure-dict-to-alist (text)
-  "If TEXT is a clojure dictionary, transform it
-into an elisp-friendly alist"
-  (let ((newtext text))
-    (while (string-match "{:.*}" newtext)
-      (setq newtext
-            (replace-regexp-in-string
-             ":\\(.*?\\) \\(.*?\\)[,)]" "(\\1 . \\2)"
-             ;; note extra paren here, because the replacement above
-             ;; swallows the last one
-             (replace-regexp-in-string
-              "{\\(.*\\)}" "(\\1))" newtext))))
-    newtext))
-
 (defmacro wave-client-eval (&rest rest)
   "Evaluate REST, a quoted s-expression in the FedOne REPL.
 Since the REPL is actually evaluating clojure, the code should
 actually be clojure code."
   `(car (read-from-string
-         (wave-client-clojure-dict-to-alist
-          (wave-client-escapify-clojure
-           (wave-client-send-and-receive
-            (replace-regexp-in-string "\\\\." "."
-                                      (prin1-to-string ,@rest))))))))
+         (wave-client-escapify-clojure
+          (wave-client-send-and-receive
+           (concat (replace-regexp-in-string
+                    "\\\\." "."
+                    (prin1-to-string ,@rest))))))))
 
 (defun wave-client-send-and-receive (text)
   "Send TEXT to the FedOne REPL, and return the text result."
