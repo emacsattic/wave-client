@@ -102,6 +102,10 @@ This should be the port on which the FedOne server is running."
   nil
   "Completed output from the REPL buffer.")
 
+(defun wave-client-assert-connected ()
+  (unless (buffer-live-p wave-client-repl-buf-name)
+    (error "Wave client not running")))
+
 (defun wave-client-start-fedone ()
   "Start the FedOne client process, which we talk to via a network port."
   (let ((default-directory
