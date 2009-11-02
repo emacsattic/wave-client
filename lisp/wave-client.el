@@ -78,9 +78,13 @@ This should be the port on which the FedOne server is running."
   :group 'wave-client
   :type 'integer)
 
-(defvar wave-client-repl-buf-name
+(defconst wave-client-repl-buf-name
   " *wave client repl*"
   "The buffer name of the REPL to the wave client.")
+
+(defconst wave-client-process-buf-name
+  " *fedone client*"
+  "The buffer name of the FedOne client process")
 
 (defconst wave-client-package-name
   "wave-for-emacs.client"
@@ -102,19 +106,41 @@ This should be the port on which the FedOne server is running."
   nil
   "Completed output from the REPL buffer.")
 
+(defvar wave-client-debug
+  nil
+  "Boolean indicating whether debug output should be sent to
+wave-cilent-debug-buffer")
+
+(defconst wave-client-debug-buffer
+  "*Wave Client Debug Buffer*"
+  "Name of the buffer wear debug output is sent to")
+
+(defun wave-client-debug (str)
+  "Send STR to the `wave-client-debug-buffer', with newline."
+  (when wave-client-debug
+    (save-excursion
+      (set-buffer
+       (get-buffer-create wave-client-debug-buffer))
+      (goto-char (point-max))
+      (insert str)
+      (insert "\n"))))
+
 (defun wave-client-assert-connected ()
-  (unless (buffer-live-p wave-client-repl-buf-name)
+  (unless (buffer-live-p
+           (get-buffer wave-client-process-buf-name))
     (error "Wave client not running")))
 
 (defun wave-client-start-fedone ()
   "Start the FedOne client process, which we talk to via a network port."
+
+  ;; TODO(ahyatt): After starting the process, check for errors and
+  ;; report back.
   (let ((default-directory
           (replace-regexp-in-string "\\([^/]\\)$" "\\1/"
-                                    wave-client-root-dir))
-        (buffer-name " *fedone client*"))
+                                    wave-client-root-dir)))
                           ""
     (start-process "wave client startrepl"
-                   buffer-name
+                   wave-client-process-buf-name
                    (concat wave-client-root-dir
                            "start-repl.sh")
                    wave-client-java-location
@@ -122,6 +148,7 @@ This should be the port on which the FedOne server is running."
 
 (defun wave-client-process-filter (process output)
   "Stores the output from a process."
+  (wave-client-debug (concat "Filtering output: " output))
   (let ((finished t) ; for now, let's just always consider us
                      ; finished, otherwise we get some errors with
                      ; false positives here
@@ -142,8 +169,17 @@ This should be the port on which the FedOne server is running."
           (concat wave-client-temp-output temp-output))
     (when finished
       (setq wave-client-output wave-client-temp-output)
+      (wave-client-debug (concat "Output: " wave-client-output))
       (setq wave-client-has-output t)
       (setq wave-client-temp-output ""))))
+
+(defun wave-client-disconnect ()
+  "Stops the Clojure REPL process"
+  (interactive)
+  (wave-client-assert-connected)
+  (delete-process wave-client-process-name)
+  (when (buffer-live-p wave-client-repl-buf-name)
+    (kill-buffer wave-client-repl-buf-name)))
 
 (defun wave-client-start-repl ()
   "Connect to the FedOne client REPL process."
@@ -160,9 +196,10 @@ This should be the port on which the FedOne server is running."
           (error
            (if (= attempt-num 2)
                (error "Wave REPL did not start in time")
-             (message "Waiting for wave REPL to be ready")
+             (message "Waiting for Wave REPL to be ready")
              (sleep-for 1)
              (incf attempt-num))))))
+    (message "Connected to Wave REPL")
     (set-process-filter (get-process wave-client-process-name)
                         'wave-client-process-filter)))
 
