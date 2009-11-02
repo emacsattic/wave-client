@@ -68,10 +68,10 @@ Every wave takes up one line."
         (concat "%-" (int-to-string digest-length)
                 "s [%-" (int-to-string participants-length)
                 "s]\n")
-        (cdr (assoc 'digest summary-alist))
+        (cdr (assoc :digest summary-alist))
         (let ((participants-str
                (mapconcat 'wave-list-username-only
-                          (cdr (assoc 'participants summary-alist))
+                          (cdr (assoc :participants summary-alist))
                           ", ")))
           (substring participants-str 0
                      (min (length participants-str)
@@ -94,7 +94,7 @@ The wave client must be connected here."
   (setq mode-name "Wave List")
   (use-local-map wave-list-mode-map)
   (make-variable-buffer-local 'wave-list-waves)
-  (wave-list-render-wave-list (wave-list))
+  (wave-list-render-wave-list (wave-inbox))
   (buffer-disable-undo)
   (setq buffer-read-only t
 	show-trailing-whitespace nil
