@@ -139,10 +139,18 @@ wave-cilent-debug-buffer")
           (replace-regexp-in-string "\\([^/]\\)$" "\\1/"
                                     wave-client-root-dir)))
                           ""
+    (setq wave-client-clojure-repl
+	  (concat (file-name-as-directory wave-client-root-dir)
+		  "start-repl.sh"))
+    (if (not (file-exists-p wave-client-java-location))
+	(error (concat "Unable to find java program \""  
+		       wave-client-java-location "\".")))
+    (if (not (file-exists-p wave-client-clojure-repl))
+	(error (concat "Unable to find script\"" 
+		       wave-client-clojure-repl "\".")))
     (start-process "wave client startrepl"
                    wave-client-process-buf-name
-                   (concat wave-client-root-dir
-                           "start-repl.sh")
+		   wave-client-clojure-repl
                    wave-client-java-location
                    (int-to-string wave-client-port))))
 
