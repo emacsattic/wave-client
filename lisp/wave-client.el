@@ -28,37 +28,16 @@
 ;; This code represents a replaceable backend layer for the emacs wave
 ;; mode.  It is responsible for communicating with the Wave server.
 ;;
-;; The present form of communication takes place through a
-;; Clojure-based REPL on top of the FedOne codebase.  That REPL
-;; actually handles the real client/server communication.
-;;
-;; When a general client/server spec is implemented, we should use it
-;; here instead of the FedOne REPL.  In that case, most of the private
-;; functions would be replaced.
+;; This backend uses a direct connection to https://wave.google.com.
 
-(require 'net-utils)
-
-;;; Code:
-(defcustom wave-client-server "localhost"
-  "The server host (without a port) that the wave client will connect to."
-  :group 'wave-client)
-
-(defcustom wave-client-port 8123
-  "The REPL port that the wave client will connect to."
-  :group 'wave-client
-  :type 'integer)
-
-(defcustom wave-client-java-location "/usr/bin/java"
-  "The location of the java 1.6 executable (used for starting the server)."
-  :group 'wave-client
-  :type '(file :must-match t))
-
-(defcustom wave-client-root-dir ""
-  "Location of the root of the wave-client-for-emacs directory."
-  :group 'wave-client
-  :type '(file :must-match t))
+(require 'json)
+(require 'url)
 
 (defcustom wave-client-user ""
+  "Name of the Wave user to connect as."
+  :group 'wave-client)
+
+(defcustom wave-client-password nil
   "Name of the Wave user to connect as."
   :group 'wave-client)
 
@@ -67,49 +46,26 @@
 match the domain in the FedOne server's `run-config.sh' file."
   :group 'wave-client)
 
-(defcustom wave-client-server-hostname "localhost"
-  "The hostname of of the server the wave client REPL must connect to.
-This should be the hostname that the FedOne server is running on."
-  :group 'wave-client)
-
-(defcustom wave-client-server-port "9876"
-  "The port of the server the wave client REPL must connect to.
-This should be the port on which the FedOne server is running."
-  :group 'wave-client
-  :type 'integer)
-
-(defconst wave-client-repl-buf-name
-  " *wave client repl*"
-  "The buffer name of the REPL to the wave client.")
-
 (defconst wave-client-process-buf-name
-  " *fedone client*"
+  " *wave client*"
   "The buffer name of the FedOne client process")
-
-(defconst wave-client-package-name
-  "wave-for-emacs.client"
-  "The name of the package of the Clojure REPL.")
-
-(defconst wave-client-process-name
-  "wave client repl"
-  "The name of the process for the Clojure REPL.")
 
 (defvar wave-client-temp-output
   ""
   "Temporary output to the REPL buffer.")
 
-(defconst wave-client-has-ouput
-  nil
-  "This boolean indicates that the REPL has output to process.")
-
-(defvar wave-client-output
-  nil
-  "Completed output from the REPL buffer.")
-
 (defvar wave-client-debug
   nil
   "Boolean indicating whether debug output should be sent to
-wave-cilent-debug-buffer")
+wave-client-debug-buffer")
+
+(defvar wave-client-auth-cookie
+  nil
+  "Auth cookie to use for Wave.")
+
+(defvar wave-client-session
+  nil
+  "The Wave current session")
 
 (defconst wave-client-debug-buffer
   "*Wave Client Debug Buffer*"
@@ -130,138 +86,95 @@ wave-cilent-debug-buffer")
            (get-buffer wave-client-process-buf-name))
     (error "Wave client not running")))
 
-(defun wave-client-start-fedone ()
-  "Start the FedOne client process, which we talk to via a network port."
-
-  ;; TODO(ahyatt): After starting the process, check for errors and
-  ;; report back.
-  (let ((default-directory
-          (replace-regexp-in-string "\\([^/]\\)$" "\\1/"
-                                    wave-client-root-dir)))
-                          ""
-    (setq wave-client-clojure-repl
-	  (concat (file-name-as-directory wave-client-root-dir)
-		  "start-repl.sh"))
-    (if (not (file-exists-p wave-client-java-location))
-	(error (concat "Unable to find java program \""  
-		       wave-client-java-location "\".")))
-    (if (not (file-exists-p wave-client-clojure-repl))
-	(error (concat "Unable to find script\"" 
-		       wave-client-clojure-repl "\".")))
-    (start-process "wave client startrepl"
-                   wave-client-process-buf-name
-		   wave-client-clojure-repl
-                   wave-client-java-location
-                   (int-to-string wave-client-port))))
-
-(defun wave-client-process-filter (process output)
-  "Stores the output from a process."
-  (wave-client-debug (concat "Filtering output: " output))
-  (let ((finished t) ; for now, let's just always consider us
-                     ; finished, otherwise we get some errors with
-                     ; false positives here
-        (temp-output output))
-    ;; Delete the prompts, if there are any
-    (setq temp-output (replace-regexp-in-string "^.*=>\s*" "" temp-output))
-    ;; Sometimes there are stray nills around, presumably from our
-    ;; flush statement.  Let's just get rid of those quietly, if
-    ;; there's something else there.
-    (when (string-match "(" temp-output)
-      (setq temp-output
-            (replace-regexp-in-string
-             "\n" ""
-             (replace-regexp-in-string "^nil$" "" temp-output))))
-    ;; Delete newlines
-    (setq temp-output (replace-regexp-in-string "\n$" "" temp-output))
-    (setq wave-client-temp-output
-          (concat wave-client-temp-output temp-output))
-    (when finished
-      (setq wave-client-output wave-client-temp-output)
-      (wave-client-debug (concat "Output: " wave-client-output))
-      (setq wave-client-has-output t)
-      (setq wave-client-temp-output ""))))
-
-(defun wave-client-disconnect ()
-  "Stops the Clojure REPL process"
-  (interactive)
-  (wave-client-assert-connected)
-  (delete-process wave-client-process-name)
-  (when (buffer-live-p wave-client-repl-buf-name)
-    (kill-buffer wave-client-repl-buf-name)))
-
-(defun wave-client-start-repl ()
-  "Connect to the FedOne client REPL process."
+(defun wave-client-get-auth-cookie ()
+  "Return the auth cookie for this user."
   (save-excursion
-    (let ((attempt-num 0)
-          connected)
-      (while (and (not connected) (< attempt-num 3))
-        (condition-case nil
-            (progn
-              (open-network-stream wave-client-process-name
-                                   nil
-                                   wave-client-server wave-client-port)
-              (setq connected t))
-          (error
-           (if (= attempt-num 2)
-               (error "Wave REPL did not start in time")
-             (message "Waiting for Wave REPL to be ready")
-             (sleep-for 1)
-             (incf attempt-num))))))
-    (message "Connected to Wave REPL")
-    (set-process-filter (get-process wave-client-process-name)
-                        'wave-client-process-filter)))
+    (set-buffer
+     (wave-client-curl "https://www.google.com/accounts/ClientLogin"
+                       `(("Email" . ,wave-client-user)
+                         ("Passwd" . ,(or wave-client-password
+                                          (let ((password
+                                                 (read-passwd "Password: ")))
+                                            (setq wave-client-password password)
+                                            password)))
+                         ("accountType" . "GOOGLE")
+                         ("service" . "wave")
+                         ("source" . "emacs-wave")) '()))
+    (goto-char (point-min))
+    (search-forward-regexp "Auth=\\(.*\\)$")
+    (match-string 1)))
 
-(defun wave-client-connect ()
-  "Start up a connection to the Wave server."
-  (interactive)
-  (wave-client-start-fedone)
-  (wave-client-start-repl)
-  ;; get the first prompt
-  (accept-process-output nil 0.5)
-  ;; output to this is retrieved separately
-  (wave-client-eval '(in-ns 'wave-for-emacs.client))
-  (wave-client-eval `(open-backend
-                     ,(concat wave-client-user "@" wave-client-domain)
-                     ,wave-client-server-hostname
-                     ,(string-to-int wave-client-server-port))))
+(defun wave-client-curl (url data cookies)
+  "Execute curl with a given URL and cookie DATA, return the
+buffer with the result."
+  (let ((buf (generate-new-buffer wave-client-process-buf-name)))
+    (apply 'call-process (append (list "curl" nil buf nil url)
+                                 (mapcan (lambda (c)
+                                           (list "-d"
+                                                 (concat
+                                                  (url-hexify-string (car c))
+                                                  "="
+                                                  (url-hexify-string (cdr c)))))
+                                           data)
+                                 (list
+                                  "-b"
+                                  (mapconcat
+                                   (lambda (c)
+                                     (concat
+                                      (url-hexify-string (car c))
+                                      "="
+                                      (url-hexify-string (cdr c))))
+                                   cookies "; "))))
+    buf))
 
-(defun wave-client-escapify-clojure (text)
-  "Escape any clojure-outputted symbols in TEXT that emacs cannot
-read in the `read-from-string' method."
-  (replace-regexp-in-string "\\(#<.*>\\)" "\"\\1\"" text))
+(defun wave-client-json-read (text &optional object-type)
+  "Munge the text of the json TEXT to be in the precise form
+  json.el expects.  We encode according to OBJECT-TYPE which
+  default to plist."
+  (let ((json-object-type (or object-type 'plist))
+        (json-key-type nil))
+    (json-read-from-string
+     (let ((double-quoted-text (or (string-replace-match "'" text "\"" nil t)
+                                   text)))
+       (or (string-replace-match "\\([{,]\\)\\([[:word:]_]+\\):" double-quoted-text
+                                 "\\1\"\\2\":" nil t) double-quoted-text)))))
 
-(defmacro wave-client-eval (&rest rest)
-  "Evaluate REST, a quoted s-expression in the FedOne REPL.
-Since the REPL is actually evaluating clojure, the code should
-actually be clojure code."
-  `(car (read-from-string
-         (wave-client-escapify-clojure
-          (wave-client-send-and-receive
-           (concat (replace-regexp-in-string
-                    "\\\\." "."
-                    (prin1-to-string ,@rest))))))))
+(defun wave-client-get-waves ()
+  "Get a list of waves.  Also has the side effect of populating
+the `wave-client-session' variable."
+  (let ((auth-cookie (or wave-client-auth-cookie
+                         (let ((cookie (wave-client-get-auth-cookie)))
+                           (setq wave-client-get-auth-cookie cookie)
+                           cookie))))
+    (save-excursion
+      (set-buffer (wave-client-curl "https://wave.google.com/wave/"
+                                    '()
+                                    `(("WAVE" . ,auth-cookie))))
+      (goto-char (point-min))
+      (search-forward-regexp "__session = \\({.*}\\);var")
+      (setq wave-client-session (wave-client-json-read
+                                 (match-string 1)))
+      (search-forward-regexp "json = \\({\"r\":\"^d1\".*}\\);")
+      (wave-client-json-read (match-string 1)))))
 
-(defun wave-client-send-and-receive (text)
-  "Send TEXT to the FedOne REPL, and return the text result."
-  (setq wave-client-has-output nil)
-  (setq wave-client-output nil)
-  (process-send-string wave-client-process-name text)
-  (accept-process-output nil)
-  (process-send-string wave-client-process-name "(flush)")
-  (accept-process-output nil)
-  (while (not wave-client-has-output)
-    (message "Waiting for Wave REPL output")
-    (accept-process-output nil 0.5))
-  (if (equal "" wave-client-output)
-      "nil"
-    wave-client-output))
-
+(defun wave-client-extract-waves (wave-plist)
+  "Extract information from the raw WAVE-PLIST, transforming it
+into the format defined by `wave-inbox'."
+  (mapcar (lambda (wave)
+            (list
+             (cons :id (plist-get wave :1))
+             (cons :digest (plist-get (plist-get wave :9) :1))
+             (cons :author (plist-get wave :4))))
+          (plist-get (plist-get wave-plist :p) :1)))
 
 ;; Functions for the Wave mode to use:
 
 (defun wave-inbox ()
-  "List all waves in the inbox."
-  (wave-client-eval '(get-waves)))
+  "List all waves in the inbox. Output format is an alist of waves,
+each having a `:digest',`:author', and `id'.  The author is the
+first contributor to the first wavelet, which should be the
+person who contributed the wave."
+  (wave-client-extract-waves (wave-client-get-waves)))
 
 (provide 'wave-client)
 

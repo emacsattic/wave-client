@@ -69,10 +69,7 @@ Every wave takes up one line."
                 "s [%-" (int-to-string participants-length)
                 "s]\n")
         (cdr (assoc :digest summary-alist))
-        (let ((participants-str
-               (mapconcat 'wave-list-username-only
-                          (cdr (assoc :participants summary-alist))
-                          ", ")))
+        (let ((participants-str (cdr (assoc :author summary-alist))))
           (substring participants-str 0
                      (min (length participants-str)
                           participants-length)))))))
