@@ -82,8 +82,8 @@ wave-client-debug-buffer")
       (insert "\n"))))
 
 (defun wave-client-assert-connected ()
-  (unless (buffer-live-p
-           (get-buffer wave-client-process-buf-name))
+  (unless (and wave-client-auth-cookie
+               wave-client-session)
     (error "Wave client not running")))
 
 (defun wave-client-get-auth-cookie ()
