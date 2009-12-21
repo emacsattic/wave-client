@@ -41,6 +41,8 @@
   "Name of the Wave user to connect as."
   :group 'wave-client)
 
+;; TODO(ahyatt): Use this when making connections, instead of
+;; hardcoding to the default main instance of wave.google.com.
 (defcustom wave-client-domain ""
   "Domain of the Wave server (such as `wavesandbox.com').  Should
 match the domain in the FedOne server's `run-config.sh' file."
