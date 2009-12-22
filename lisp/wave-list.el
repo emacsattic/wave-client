@@ -33,6 +33,22 @@
 (require 'wave-client)
 
 ;;; Code:
+(defface wave-list-author
+  '((((class color)) (:foreground "Green"))
+    (t (:italic t)))
+  "Face used for Wave authors."
+  :group 'wave-list-faces)
+
+(defface wave-list-unread-summary
+  '((t (:bold t)))
+  "Face used for unread Wave summaries"
+  :group 'wave-list-faces)
+
+(defface wave-list-read-summary
+  '(())
+  "Face used for read Wave summaries"
+  :group 'wave-list-faces)
+
 (defvar wave-list-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map "n" 'next-line)
@@ -65,26 +81,34 @@ Every wave takes up one line."
   (setq buffer-read-only nil)
   (erase-buffer)
   (dolist (summary-alist wave-list)
-    (insert
-     (let* ((unread-length 5)
-            (author-length 15)
-            (digest-length
-             (- (window-width) author-length unread-length 2)))
-       (format
-        (concat "%-" (int-to-string unread-length)
-                "s %-" (int-to-string digest-length)
-                "s %-" (int-to-string author-length)
-                "s\n")
-        (let ((num-unread (cdr (assoc :unread summary-alist))))
-          (if (> num-unread 0) num-unread ""))
-        (wave-list-str-truncate (cdr (assoc :digest summary-alist))
-         digest-length)
-        (wave-list-str-truncate
-         (replace-regexp-in-string (concat "@"
-					   (or wave-client-domain "googlewave.com"))
-				   ""
-                                   (cdr (assoc :author summary-alist)))
-         author-length)))))
+    (let ((num-unread (cdr (assoc :unread summary-alist))))
+      (insert
+       (let* ((unread-length 5)
+              (author-length 15)
+              (digest-length
+               (- (window-width) author-length unread-length 2)))
+         (format
+          (concat "%-" (int-to-string unread-length)
+                  "s %-" (int-to-string digest-length)
+                  "s %-" (int-to-string author-length)
+                  "s\n")
+          (if (> num-unread 0) num-unread "")
+          (wave-list-str-truncate (cdr (assoc :digest summary-alist))
+                                  digest-length)
+          (wave-list-str-truncate
+           (replace-regexp-in-string (concat "@"
+                                             (or wave-client-domain "googlewave.com"))
+                                     ""
+                                     (cdr (assoc :author summary-alist)))
+           author-length))))
+      (let ((bol (save-excursion (beginning-of-line 0) (point)))
+            (pre-author (save-excursion (re-search-backward " \\w+")(point)))
+            (eol (save-excursion (end-of-line 0) (point))))
+        (add-text-properties bol pre-author `(face
+                                              ,(if (> num-unread 0)
+                                                   'wave-list-unread-summary
+                                                 'wave-list-read-summary)))
+        (add-text-properties (+ 1 pre-author) eol '(face wave-list-author)))))
   (goto-char (point-max))
   (backward-char)
   (kill-line)
