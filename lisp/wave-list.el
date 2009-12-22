@@ -53,6 +53,10 @@ If no @ symbol is found, return FULL-USERNAME unmodified."
              (or (string-match "@" full-username)
                  (length full-username))))
 
+(defun wave-list-str-truncate (s max-width)
+  "Truncate string S to MAX-WIDTH chars."
+  (substring s 0 (min (length s) max-width)))
+
 (defun wave-list-render-wave-list (wave-list)
   "Render WAVE-LIST, a list of wave summary alists to a buffer.
 
@@ -62,17 +66,17 @@ Every wave takes up one line."
   (erase-buffer)
   (dolist (summary-alist wave-list)
     (insert
-     (let ((digest-length 50)
-           (participants-length 27))
+     (let* ((author-length 27)
+            (digest-length
+             (- (window-width) author-length 3)))
        (format
         (concat "%-" (int-to-string digest-length)
-                "s [%-" (int-to-string participants-length)
+                "s [%-" (int-to-string author-length)
                 "s]\n")
-        (cdr (assoc :digest summary-alist))
-        (let ((participants-str (cdr (assoc :author summary-alist))))
-          (substring participants-str 0
-                     (min (length participants-str)
-                          participants-length)))))))
+        (wave-list-str-truncate (cdr (assoc :digest summary-alist))
+                                digest-length)
+        (wave-list-str-truncate (cdr (assoc :author summary-alist))
+                                author-length)))))
   (goto-char (point-max))
   (backward-char)
   (kill-line)
