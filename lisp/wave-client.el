@@ -35,7 +35,8 @@
 (require 'url)
 
 (defcustom wave-client-user ""
-  "Name of the Wave user to connect as."
+  "Name of the Wave user to connect as.  Do NOT include the
+domain for hosted accounts such wavesandbox."
   :group 'wave-client)
 
 (defcustom wave-client-password nil
@@ -44,9 +45,9 @@
 
 ;; TODO(ahyatt): Use this when making connections, instead of
 ;; hardcoding to the default main instance of wave.google.com.
-(defcustom wave-client-domain ""
-  "Domain of the Wave server (such as `wavesandbox.com').  Should
-match the domain in the FedOne server's `run-config.sh' file."
+(defcustom wave-client-domain nil
+  "Domain of the Wave server (such as `wavesandbox.com'), or nil
+for the default domain."
   :group 'wave-client)
 
 (defconst wave-client-process-buf-name
@@ -89,18 +90,31 @@ wave-client-debug-buffer")
                wave-client-session)
     (error "Wave client not running")))
 
+(defun wave-client-get-url (&optional path)
+  "Returns a proper URL given a PATH, which must start with a /
+to the end, if given.  Uses `wave-client-domain'."
+  (when (eq wave-client-domain "")
+    (error "wave-client-domain empty, should probably be nil"))
+  (format "https://wave.google.com%s%s"
+          (if wave-client-domain
+                        (concat "/a/" wave-client-domain)
+                      "")
+          (or path "/")))
+
 (defun wave-client-get-auth-cookie ()
   "Return the auth cookie for this user."
   (save-excursion
     (set-buffer
      (wave-client-curl "https://www.google.com/accounts/ClientLogin"
-                       `(("Email" . ,wave-client-user)
+                       `(("Email" . ,(concat wave-client-user
+                                             (when wave-client-domain
+                                               (concat "@" wave-client-domain))))
                          ("Passwd" . ,(or wave-client-password
                                           (let ((password
                                                  (read-passwd "Password: ")))
                                             (setq wave-client-password password)
                                             password)))
-                         ("accountType" . "GOOGLE")
+                         ("accountType" . "HOSTED_OR_GOOGLE")
                          ("service" . "wave")
                          ("source" . "emacs-wave")) '()))
     (goto-char (point-min))
@@ -151,7 +165,7 @@ the `wave-client-session' variable."
                            (setq wave-client-get-auth-cookie cookie)
                            cookie))))
     (save-excursion
-      (set-buffer (wave-client-curl "https://wave.google.com/wave/"
+      (set-buffer (wave-client-curl (wave-client-get-url)
                                     '()
                                     `(("WAVE" . ,auth-cookie))))
       (goto-char (point-min))
