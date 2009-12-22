@@ -30,6 +30,7 @@
 ;;
 ;; This backend uses a direct connection to https://wave.google.com.
 
+(require 'cl)
 (require 'json)
 (require 'url)
 
@@ -136,10 +137,11 @@ buffer with the result."
   (let ((json-object-type (or object-type 'plist))
         (json-key-type nil))
     (json-read-from-string
-     (let ((double-quoted-text (or (string-replace-match "'" text "\"" nil t)
+     (let ((double-quoted-text (or (replace-regexp-in-string "'" "\"" text)
                                    text)))
-       (or (string-replace-match "\\([{,]\\)\\([[:word:]_]+\\):" double-quoted-text
-                                 "\\1\"\\2\":" nil t) double-quoted-text)))))
+       (or (replace-regexp-in-string
+            "\\([{,]\\)\\([[:word:]_]+\\):"
+            "\\1\"\\2\":" double-quoted-text) double-quoted-text)))))
 
 (defun wave-client-get-waves ()
   "Get a list of waves.  Also has the side effect of populating

@@ -84,7 +84,6 @@ Every wave takes up one line."
 Each line in the mode represents a Wave that can be opened.
 The wave client must be connected here."
   (interactive)
-  (wave-client-assert-connected)
   (set-buffer (get-buffer-create wave-list-buffer-name))
   (kill-all-local-variables)
   (setq major-mode 'wave-list-mode)
