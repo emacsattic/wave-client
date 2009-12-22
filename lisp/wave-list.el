@@ -66,17 +66,25 @@ Every wave takes up one line."
   (erase-buffer)
   (dolist (summary-alist wave-list)
     (insert
-     (let* ((author-length 27)
+     (let* ((unread-length 5)
+            (author-length 15)
             (digest-length
-             (- (window-width) author-length 3)))
+             (- (window-width) author-length unread-length 2)))
        (format
-        (concat "%-" (int-to-string digest-length)
-                "s [%-" (int-to-string author-length)
-                "s]\n")
+        (concat "%-" (int-to-string unread-length)
+                "s %-" (int-to-string digest-length)
+                "s %-" (int-to-string author-length)
+                "s\n")
+        (let ((num-unread (cdr (assoc :unread summary-alist))))
+          (if (> num-unread 0) num-unread ""))
         (wave-list-str-truncate (cdr (assoc :digest summary-alist))
-                                digest-length)
-        (wave-list-str-truncate (cdr (assoc :author summary-alist))
-                                author-length)))))
+         digest-length)
+        (wave-list-str-truncate
+         (replace-regexp-in-string (concat "@"
+					   (or wave-client-domain "googlewave.com"))
+				   ""
+                                   (cdr (assoc :author summary-alist)))
+         author-length)))))
   (goto-char (point-max))
   (backward-char)
   (kill-line)

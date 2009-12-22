@@ -181,6 +181,7 @@ into the format defined by `wave-inbox'."
   (mapcar (lambda (wave)
             (list
              (cons :id (plist-get wave :1))
+             (cons :unread (plist-get wave :7))  ;; int
              (cons :digest (plist-get (plist-get wave :9) :1))
              (cons :author (plist-get wave :4))))
           (plist-get (plist-get wave-plist :p) :1)))
