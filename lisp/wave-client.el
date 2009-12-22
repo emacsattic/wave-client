@@ -98,7 +98,7 @@ to the end, if given.  Uses `wave-client-domain'."
   (format "https://wave.google.com%s%s"
           (if wave-client-domain
                         (concat "/a/" wave-client-domain)
-                      "")
+                      "/wave")
           (or path "/")))
 
 (defun wave-client-get-auth-cookie ()
