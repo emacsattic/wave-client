@@ -118,7 +118,9 @@ to the end, if given.  Uses `wave-client-domain'."
                                             (read-passwd "Password: ")))
                                        (setq wave-client-password password)
                                        password)))
-                               ("accountType" . "HOSTED_OR_GOOGLE")
+                               ("accountType" . ,(if wave-client-domain
+                                                     "HOSTED_OR_GOOGLE"
+                                                   "GOOGLE"))
                                ("service" . "wave")
                                ("source" . "emacs-wave")) '()))
           (goto-char (point-min))
@@ -157,7 +159,7 @@ buffer with the result."
                                             (url-hexify-string (cdr c))))
                                          cookies "; "))))))
     (when (= retval 22)
-        (error "HTTP error loading page %s" url)))
+        (error "HTTP error loading page %s" url))
     buf))
 
 (defun wave-client-json-read (text &optional object-type)
