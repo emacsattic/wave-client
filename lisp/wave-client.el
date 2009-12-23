@@ -51,8 +51,8 @@ for the default domain."
   :group 'wave-client)
 
 (defconst wave-client-process-buf-name
-  " *wave client*"
-  "The buffer name of the FedOne client process")
+  "*wave client*"
+  "The buffer of the curl process")
 
 (defvar wave-client-temp-output
   ""
@@ -104,44 +104,60 @@ to the end, if given.  Uses `wave-client-domain'."
 (defun wave-client-get-auth-cookie ()
   "Return the auth cookie for this user."
   (save-excursion
-    (set-buffer
-     (wave-client-curl "https://www.google.com/accounts/ClientLogin"
-                       `(("Email" . ,(concat wave-client-user
-                                             (when wave-client-domain
-                                               (concat "@" wave-client-domain))))
-                         ("Passwd" . ,(or wave-client-password
-                                          (let ((password
-                                                 (read-passwd "Password: ")))
-                                            (setq wave-client-password password)
-                                            password)))
-                         ("accountType" . "HOSTED_OR_GOOGLE")
-                         ("service" . "wave")
-                         ("source" . "emacs-wave")) '()))
-    (goto-char (point-min))
-    (search-forward-regexp "Auth=\\(.*\\)$")
-    (match-string 1)))
+    (unwind-protect
+        (progn
+          (set-buffer
+           (wave-client-curl "https://www.google.com/accounts/ClientLogin"
+                             `(("Email" .
+                                ,(concat wave-client-user
+                                         (when wave-client-domain
+                                           (concat "@" wave-client-domain))))
+                               ("Passwd" .
+                                ,(or wave-client-password
+                                     (let ((password
+                                            (read-passwd "Password: ")))
+                                       (setq wave-client-password password)
+                                       password)))
+                               ("accountType" . "HOSTED_OR_GOOGLE")
+                               ("service" . "wave")
+                               ("source" . "emacs-wave")) '()))
+          (goto-char (point-min))
+          (search-forward-regexp "Auth=\\(.*\\)$")
+          (match-string 1))
+      (unless (wave-client-kill-current-process-buffer)
+        (setq wave-client-password nil)))))
+
+(defun wave-client-kill-current-process-buffer ()
+  "Kill the current buffer, if it is a temporary buffer,
+otherwise do nothing."
+  (when (string-match wave-client-process-buf-name
+                      (buffer-name))
+    (kill-buffer)))
 
 (defun wave-client-curl (url data cookies)
   "Execute curl with a given URL and cookie DATA, return the
 buffer with the result."
-  (let ((buf (generate-new-buffer wave-client-process-buf-name)))
-    (apply 'call-process (append (list "curl" nil buf nil url)
-                                 (mapcan (lambda (c)
-                                           (list "-d"
-                                                 (concat
-                                                  (url-hexify-string (car c))
-                                                  "="
-                                                  (url-hexify-string (cdr c)))))
-                                           data)
-                                 (list
-                                  "-b"
-                                  (mapconcat
-                                   (lambda (c)
-                                     (concat
-                                      (url-hexify-string (car c))
-                                      "="
-                                      (url-hexify-string (cdr c))))
-                                   cookies "; "))))
+  (let* ((buf (generate-new-buffer wave-client-process-buf-name))
+         (retval
+          (apply 'call-process (append (list "curl" nil buf nil url "-f")
+                                       (mapcan (lambda (c)
+                                                 (list "-d"
+                                                       (concat
+                                                        (url-hexify-string (car c))
+                                                        "="
+                                                        (url-hexify-string (cdr c)))))
+                                               data)
+                                       (list
+                                        "-b"
+                                        (mapconcat
+                                         (lambda (c)
+                                           (concat
+                                            (url-hexify-string (car c))
+                                            "="
+                                            (url-hexify-string (cdr c))))
+                                         cookies "; "))))))
+    (when (= retval 22)
+        (error "HTTP error loading page %s" url)))
     buf))
 
 (defun wave-client-json-read (text &optional object-type)
@@ -165,15 +181,18 @@ the `wave-client-session' variable."
                            (setq wave-client-get-auth-cookie cookie)
                            cookie))))
     (save-excursion
-      (set-buffer (wave-client-curl (wave-client-get-url)
-                                    '()
-                                    `(("WAVE" . ,auth-cookie))))
-      (goto-char (point-min))
-      (search-forward-regexp "__session = \\({.*}\\);var")
-      (setq wave-client-session (wave-client-json-read
-                                 (match-string 1)))
-      (search-forward-regexp "json = \\({\"r\":\"^d1\".*}\\);")
-      (wave-client-json-read (match-string 1)))))
+      (unwind-protect
+          (progn
+            (set-buffer (wave-client-curl (wave-client-get-url)
+                                          '()
+                                          `(("WAVE" . ,auth-cookie))))
+            (goto-char (point-min))
+            (search-forward-regexp "__session = \\({.*}\\);var")
+            (setq wave-client-session (wave-client-json-read
+                                       (match-string 1)))
+            (search-forward-regexp "json = \\({\"r\":\"^d1\".*}\\);")
+            (wave-client-json-read (match-string 1)))
+        (wave-client-kill-current-process-buffer)))))
 
 (defun wave-client-extract-waves (wave-plist)
   "Extract information from the raw WAVE-PLIST, transforming it
