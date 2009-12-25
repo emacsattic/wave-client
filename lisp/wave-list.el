@@ -31,6 +31,7 @@
 ;; mute them, and be able to get different lists (with searches).
 
 (require 'wave-client)
+(require 'wave-display)
 
 ;;; Code:
 (defface wave-list-author
