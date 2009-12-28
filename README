@@ -33,10 +33,6 @@ To connect to a specific domain, such as sandbox, add this line as well:
 Known issues
 ------------
 
-We are not fixing up the JSON properly.  Instead of patching it up
-with regular expressions, we should change certain json.el functions
-to handle the kind of JSON that the Wave server returns.
-
 Delete blips are shown.
 
 Blips are not shown in the same order as in the UI.

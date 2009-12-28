@@ -128,7 +128,8 @@ that is a direct conversion from the JSON."
                                 `(("WAVE" . ,wave-client-auth-cookie))))
           (goto-char (point-min))
           (re-search-forward "{")
-          (wave-client-json-read (substring (buffer-string) (- (point) 2))))
+          (wave-client-json-read (substring (buffer-string)
+					    (- (point) 2))))
       (wave-client-kill-current-process-buffer))))
 
 (defun wave-client-get-auth-cookie ()
@@ -193,18 +194,23 @@ buffer with the result."
         (error "HTTP error loading page %s" url))
     buf))
 
-(defun wave-client-json-read (text &optional object-type)
+(defun wave-client-json-read (text &optional do-extra-munging object-type)
   "Munge the text of the json TEXT to be in the precise form
   json.el expects.  We encode according to OBJECT-TYPE which
-  default to plist."
+  default to plist.  If DO-EXTRA-MUNGING is turned on, then we
+  subsitute \" for \' and make sure each key is in quotes.  This
+  is not a great thing to do, but we need it for the kind of JSON
+  that Wave returns on HTML pages."
   (let ((json-object-type (or object-type 'plist))
         (json-key-type nil))
     (json-read-from-string
-     (let ((double-quoted-text (or (replace-regexp-in-string "'" "\"" text)
-                                   text)))
-       (or (replace-regexp-in-string
-            "\\([{,]\\)\\([[:word:]_]+\\):"
-            "\\1\"\\2\":" double-quoted-text) double-quoted-text)))))
+     (if do-extra-munging
+	 (let ((double-quoted-text (or (replace-regexp-in-string "'" "\"" text)
+				       text)))
+	   (or (replace-regexp-in-string
+		"\\([{,]\\)\\([[:word:]_]+\\):"
+		"\\1\"\\2\":" double-quoted-text) double-quoted-text))
+       text))))
 
 (defun wave-client-get-waves ()
   "Get a list of waves.  Also has the side effect of populating
@@ -222,9 +228,9 @@ the `wave-client-session' variable."
             (goto-char (point-min))
             (search-forward-regexp "__session = \\({.*}\\);var")
             (setq wave-client-session (wave-client-json-read
-                                       (match-string 1)))
+                                       (match-string 1) t))
             (search-forward-regexp "json = \\({\"r\":\"^d1\".*}\\);")
-            (wave-client-json-read (match-string 1)))
+            (wave-client-json-read (match-string 1) t))
         (wave-client-kill-current-process-buffer)))))
 
 (defun wave-client-extract-waves (wave-plist)
