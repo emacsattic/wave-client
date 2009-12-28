@@ -44,6 +44,9 @@
     map)
   "Keybindings for wave mode.")
 
+(defvar wave-display-blips '()
+  "Buffer-local blip to location alist.")
+
 (defun wave-display-format-user (user)
   "Given a USER such as 'ahyatt@googlewave.com', return a
   shortened form without redundant domain info, such as
@@ -53,11 +56,32 @@
                             ""
                             user))
 
+(defun wave-display-next-blip ()
+  "Moves to the next blip from the cursor."
+  (interactive)
+  (let ((blips wave-display-blips))
+    (while (and blips (>= (point) (cadar blips)))
+      (setq blips (cdr blips)))
+    ;; If we're at the end, just don't do anything.
+    (when blips
+        (goto-char (cadar blips)))))
+
+(defun wave-display-previous-blip ()
+  "Moves to the next blip from the cursor."
+  (interactive)
+  (let ((blips (reverse wave-display-blips)))
+    (while (and blips (<= (point) (cddar blips)))
+      (setq blips (cdr blips)))
+    ;; If we're at the end, just don't do anything.
+    (when blips
+        (goto-char (cadar blips)))))
+
 (defun wave-display-blip (blip-id blips level)
   "Display blip with id BLIP-ID, using data from BLIPS"
   (let ((blip (cdr (assoc blip-id blips)))
         (op-stack '())
-        (boundaries '()))
+        (boundaries '())
+        (start (point)))
     (indent-to (* 2 level))
     (insert (format "[%s]: "
                     (mapconcat 'wave-display-format-user
@@ -105,17 +129,23 @@
                                     key))))))))
             (t (message "Dont know how to deal with op: %s" op))))
     (dolist (child-id (cdr (assoc :children blip)))
-      (wave-display-blip child-id blips (+ level 1)))))
+      (wave-display-blip child-id blips (+ level 1)))
+    (setq wave-display-blips (cons (cons blip-id (cons start (point))) wave-display-blips))
+    (insert "\n")))
 
 (defun wave-display-wavelet (wavelet)
   "Display a WAVELET."
-  (when (assoc :root-blip-id wavelet)
+  (when (cdr (assoc :root-blip-id wavelet))
     (insert "Participants: "
             (mapconcat 'wave-display-format-user
                        (cdr (assoc :participants wavelet)) ", ")
             "\n")
     (wave-display-blip (cdr (assoc :root-blip-id wavelet))
-                       (cdr (assoc :blips wavelet)) 0)))
+                       (cdr (assoc :blips wavelet)) 0)
+    (setq wave-display-blips (sort wave-display-blips
+                                  (lambda (a b)
+                                    (< (cadr a)
+                                       (cadr b)))))))
 
 (defun wave-display (wave-label wave-data)
   "Display in a new or re-used buffer the wave from WAVE-DATA in
@@ -124,9 +154,11 @@ wave-list-mode.  Returns the new buffer."
     (set-buffer (get-buffer-create buf-name))
     (setq buffer-read-only nil)
     (erase-buffer)
-    ;; First wavelet seems uninteresting
-    (dolist (wavelet (cdr wave-data))
+    (make-variable-buffer-local 'wave-display-blips)
+    (setq wave-display-blips nil)
+    (dolist (wavelet wave-data)
       (wave-display-wavelet wavelet))
+    (goto-char (point-min))
     (wave-display-mode)
     (current-buffer)))
 

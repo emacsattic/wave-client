@@ -54,6 +54,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map "n" 'next-line)
     (define-key map "p" 'previous-line)
+    (define-key map "\r" 'wave-list-open)
     map)
   "Keybindings for wave-list mode.")
 
@@ -73,6 +74,14 @@ If no @ symbol is found, return FULL-USERNAME unmodified."
 (defun wave-list-str-truncate (s max-width)
   "Truncate string S to MAX-WIDTH chars."
   (substring s 0 (min (length s) max-width)))
+
+(defun wave-list-open ()
+  "Open the wave at point in the list."
+  (interactive)
+  (switch-to-buffer
+   (wave-display (get-text-property (point) 'summary)
+                 (wave-get-wave
+                  (get-text-property (point) 'wave-id)))))
 
 (defun wave-list-render-wave-list (wave-list)
   "Render WAVE-LIST, a list of wave summary alists to a buffer.
@@ -109,7 +118,9 @@ Every wave takes up one line."
                                               ,(if (> num-unread 0)
                                                    'wave-list-unread-summary
                                                  'wave-list-read-summary)))
-        (add-text-properties (+ 1 pre-author) eol '(face wave-list-author)))))
+        (add-text-properties (+ 1 pre-author) eol '(face wave-list-author))
+        (add-text-properties bol eol (list 'summary (cdr (assoc :digest summary-alist))))
+        (add-text-properties bol eol (list 'wave-id (cdr (assoc :id summary-alist)))))))
   (goto-char (point-max))
   (backward-char)
   (kill-line)
