@@ -1,4 +1,4 @@
-;;; wave-list.el --- Defines wave-list-mode, for managing waves.
+;;; wave-display.el --- Defines wave-display-mode.
 ;; Copyright (c) 2009 Andrew Hyatt
 ;;
 ;; Author: Andrew Hyatt <ahyatt at gmail dot com>
@@ -32,6 +32,23 @@
 (require 'wave-client)
 
 ;;; Code:
+
+(defface wave-blip-authors
+  '((((class color)) (:foreground "Green"))
+    (t (:italic t)))
+  "Face used for blip authors."
+  :group 'wave-display)
+
+(defface wave-wavelet-participants
+  '((((class color)) (:foreground "Green"))
+    (t (:italic t) (:bold t)))
+  "Face used for blip authors."
+  :group 'wave-display)
+
+(defface wave-title
+  '((t (:bold t)))
+  "Face used for the title of a wave."
+  :group 'wave-display)
 
 (defvar wave-display-buffer-format "*Wave %s*"
   "The format argument, which must have one %s, for a Wave's
@@ -70,11 +87,19 @@
   "Moves to the next blip from the cursor."
   (interactive)
   (let ((blips (reverse wave-display-blips)))
-    (while (and blips (<= (point) (cddar blips)))
+    (while (and blips (<= (point) (cadar blips)))
       (setq blips (cdr blips)))
     ;; If we're at the end, just don't do anything.
     (when blips
         (goto-char (cadar blips)))))
+
+(defun wave-display-users (users face)
+  "Display a list of USERS, using FACE styling."
+  (let ((begin (point)))
+    (insert (mapconcat 'wave-display-format-user
+                               users ", "))
+    (set-text-properties begin (point)
+                         (list 'face face))))
 
 (defun wave-display-blip (blip-id blips level)
   "Display blip with id BLIP-ID, using data from BLIPS"
@@ -83,10 +108,8 @@
         (boundaries '())
         (start (point)))
     (indent-to (* 2 level))
-    (insert (format "[%s]: "
-                    (mapconcat 'wave-display-format-user
-                               (cdr (assoc :authors blip))
-                               ", ")))
+    (wave-display-users (cdr (assoc :authors blip))
+                        'wave-blip-authors)
     (dolist (op (cdr (assoc :ops blip)))
       (cond ((stringp op) (insert op))
             ((eq op 'end)
@@ -115,15 +138,19 @@
              (dolist (boundary (cdr op))
                (cond ((eq (car boundary) 'change)
                       (dolist (changes (cdr boundary))
-                        (add-to-list 'boundaries
-                              (cons (cdr (assoc :key changes))
-                                    (cons changes (point))))))
+                        (dolist (change changes)
+                          (add-to-list
+                           'boundaries
+                           (cons (cdr (assoc :key change))
+                                 (cons change (point)))))))
                       ((eq (car boundary) 'end)
-                        (dolist (key (append (cdr (cdr boundary)) '()))
-                          (cond ((eq key "lang"))  ;;nothing to do
-                                ((eq key "conv/title")
-                                 ;; TODO(ahyatt): Apply title face here
-                                 )
+                        (dolist (key (append (cadr boundary) '()))
+                          (cond ((equal key "lang"))  ;;nothing to do
+                                ((equal key "conv/title")
+                                 (add-text-properties
+                                  (cddr (assoc key boundaries))
+                                  (point)
+                                  '(face wave-title)))
                                 (t (message
                                     "Don't know how to handle end-boundary of type %s"
                                     key))))))))
@@ -136,10 +163,10 @@
 (defun wave-display-wavelet (wavelet)
   "Display a WAVELET."
   (when (cdr (assoc :root-blip-id wavelet))
-    (insert "Participants: "
-            (mapconcat 'wave-display-format-user
-                       (cdr (assoc :participants wavelet)) ", ")
-            "\n")
+    (insert "Participants: ")
+    (wave-display-users (cdr (assoc :participants wavelet))
+                        'wave-wavelet-participants)
+    (insert "\n")
     (wave-display-blip (cdr (assoc :root-blip-id wavelet))
                        (cdr (assoc :blips wavelet)) 0)
     (setq wave-display-blips (sort wave-display-blips
