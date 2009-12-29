@@ -73,6 +73,16 @@
                             ""
                             user))
 
+(defun wave-display-highlight-blip ()
+  "Apply `hl-line' face to the current blip."
+  (remove-overlays)
+  (let ((blips wave-display-blips))
+    (while (and (cdr blips) (>= (point) (cadadr blips)))
+      (setq blips (cdr blips)))
+    ;; If we're at the end, just don't do anything.
+    (overlay-put (make-overlay (cadar blips) (cddar blips))
+                         'face 'hl-line)))
+
 (defun wave-display-next-blip ()
   "Moves to the next blip from the cursor."
   (interactive)
@@ -155,10 +165,10 @@
                                     "Don't know how to handle end-boundary of type %s"
                                     key))))))))
             (t (message "Dont know how to deal with op: %s" op))))
-    (dolist (child-id (cdr (assoc :children blip)))
-      (wave-display-blip child-id blips (+ level 1)))
+    (insert "\n")
     (setq wave-display-blips (cons (cons blip-id (cons start (point))) wave-display-blips))
-    (insert "\n")))
+    (dolist (child-id (cdr (assoc :children blip)))
+      (wave-display-blip child-id blips (+ level 1)))))
 
 (defun wave-display-wavelet (wavelet)
   "Display a WAVELET."
@@ -200,6 +210,7 @@ wave-list-mode.  Returns the new buffer."
         truncate-lines t
         selective-display t
         selective-display-ellipses t)
+  (add-hook 'post-command-hook 'wave-display-highlight-blip t t)
   (run-mode-hooks))
 
 (provide 'wave-display)
