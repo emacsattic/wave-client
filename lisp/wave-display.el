@@ -75,13 +75,14 @@
 
 (defun wave-display-highlight-blip ()
   "Apply `hl-line' face to the current blip."
-  (remove-overlays)
-  (let ((blips wave-display-blips))
-    (while (and (cdr blips) (>= (point) (cadadr blips)))
-      (setq blips (cdr blips)))
-    ;; If we're at the end, just don't do anything.
-    (overlay-put (make-overlay (cadar blips) (cddar blips))
-                         'face 'hl-line)))
+  (when wave-display-blips
+    (remove-overlays)
+    (let ((blips wave-display-blips))
+      (while (and (cdr blips) (>= (point) (cadadr blips)))
+        (setq blips (cdr blips)))
+      ;; If we're at the end, just don't do anything.
+      (overlay-put (make-overlay (cadar blips) (cddar blips))
+                   'face 'hl-line))))
 
 (defun wave-display-next-blip ()
   "Moves to the next blip from the cursor."
@@ -112,15 +113,15 @@
                          (list 'face face))))
 
 (defun wave-display-blip (blip-id blips level)
-  "Display blip with id BLIP-ID, using data from BLIPS"
-  (let ((blip (cdr (assoc blip-id blips)))
+  "Display blip with id BLIP-ID, using data from hashtable BLIPS"
+  (let ((blip (gethash (intern blip-id) blips))
         (op-stack '())
         (boundaries '())
         (start (point)))
     (indent-to (* 2 level))
-    (wave-display-users (cdr (assoc :authors blip))
+    (wave-display-users (plist-get blip :authors)
                         'wave-blip-authors)
-    (dolist (op (cdr (assoc :ops blip)))
+    (dolist (op (plist-get blip :ops))
       (cond ((stringp op) (insert op))
             ((eq op 'end)
              (let ((closed-op (car op-stack)))
@@ -151,7 +152,7 @@
                         (dolist (change changes)
                           (add-to-list
                            'boundaries
-                           (cons (cdr (assoc :key change))
+                           (cons (plist-get change :key)
                                  (cons change (point)))))))
                       ((eq (car boundary) 'end)
                         (dolist (key (append (cadr boundary) '()))
@@ -167,18 +168,18 @@
             (t (message "Dont know how to deal with op: %s" op))))
     (insert "\n")
     (setq wave-display-blips (cons (cons blip-id (cons start (point))) wave-display-blips))
-    (dolist (child-id (cdr (assoc :children blip)))
+    (dolist (child-id (plist-get blip :children))
       (wave-display-blip child-id blips (+ level 1)))))
 
 (defun wave-display-wavelet (wavelet)
   "Display a WAVELET."
-  (when (cdr (assoc :root-blip-id wavelet))
+  (when (plist-get wavelet :root-blip-id)
     (insert "Participants: ")
-    (wave-display-users (cdr (assoc :participants wavelet))
+    (wave-display-users (plist-get wavelet :participants)
                         'wave-wavelet-participants)
     (insert "\n")
-    (wave-display-blip (cdr (assoc :root-blip-id wavelet))
-                       (cdr (assoc :blips wavelet)) 0)
+    (wave-display-blip (plist-get wavelet :root-blip-id)
+                       (plist-get wavelet :blips) 0)
     (setq wave-display-blips (sort wave-display-blips
                                   (lambda (a b)
                                     (< (cadr a)

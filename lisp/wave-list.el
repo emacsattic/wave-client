@@ -91,7 +91,7 @@ Every wave takes up one line."
   (setq buffer-read-only nil)
   (erase-buffer)
   (dolist (summary-alist wave-list)
-    (let ((num-unread (cdr (assoc :unread summary-alist))))
+    (let ((num-unread (plist-get summary-alist :unread)))
       (insert
        (let* ((unread-length 5)
               (author-length 15)
@@ -103,13 +103,13 @@ Every wave takes up one line."
                   "s %-" (int-to-string author-length)
                   "s\n")
           (if (> num-unread 0) num-unread "")
-          (wave-list-str-truncate (cdr (assoc :digest summary-alist))
+          (wave-list-str-truncate (plist-get summary-alist :digest)
                                   digest-length)
           (wave-list-str-truncate
            (replace-regexp-in-string (concat "@"
                                              (or wave-client-domain "googlewave.com"))
                                      ""
-                                     (cdr (assoc :author summary-alist)))
+                                     (plist-get summary-alist :author))
            author-length))))
       (let ((bol (save-excursion (beginning-of-line 0) (point)))
             (pre-author (save-excursion (re-search-backward " \\w+")(point)))
@@ -119,8 +119,8 @@ Every wave takes up one line."
                                                    'wave-list-unread-summary
                                                  'wave-list-read-summary)))
         (add-text-properties (+ 1 pre-author) eol '(face wave-list-author))
-        (add-text-properties bol eol (list 'summary (cdr (assoc :digest summary-alist))))
-        (add-text-properties bol eol (list 'wave-id (cdr (assoc :id summary-alist)))))))
+        (add-text-properties bol eol (list 'summary (plist-get summary-alist :digest)))
+        (add-text-properties bol eol (list 'wave-id (plist-get summary-alist :id))))))
   (goto-char (point-max))
   (backward-char)
   (kill-line)
