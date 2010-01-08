@@ -109,7 +109,7 @@ Every wave takes up one line."
            (replace-regexp-in-string (concat "@"
                                              (or wave-client-domain "googlewave.com"))
                                      ""
-                                     (plist-get summary-alist :author))
+                                     (plist-get summary-alist :creator))
            author-length))))
       (let ((bol (save-excursion (beginning-of-line 0) (point)))
             (pre-author (save-excursion (re-search-backward " \\w+")(point)))

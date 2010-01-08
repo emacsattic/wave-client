@@ -240,7 +240,7 @@ into the format defined by `wave-inbox'."
             (list :id (plist-get wave :1)
                   :unread (plist-get wave :7)  ;; int
                   :digest (plist-get (plist-get wave :9) :1)
-                  :author (plist-get wave :4)))
+                  :creator (plist-get wave :4)))
           (plist-get (plist-get wave-plist :p) :1)))
 
 (defun wave-client-extract-boundary (boundary)
