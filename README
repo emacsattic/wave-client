@@ -1,67 +1,47 @@
 Using
 -----
 
-The codebase is divided into two parts: a Java-based client that talks
-to a Wave server, and an emacs library that talks to the Java client.
+This branch of the wave-client-for-emacs project uses a direct
+connection to the same backend that the http://wave.google.com UI
+uses.  Because of this, we have access to all the wave instances,
+without having to wait for a client/server protocol or real
+federation.
 
-Requirements:
-  - Java 1.6 JRE
-  - [TEMPORARY] A FedOne server to connect to.  See next section for details.
+Both the UI and the backend are a work in progress.  Expect this to be
+read-only for the near future.
 
+To start using, set your load-path to point to this lisp directory for
+this project, and require the wave-list, which is the entry point for
+viewing waves.
 
-Running your own test server
-----------------------------
+(add-to-list 'load-path "~/src/wave-client-for-emacs/lisp")
+(require 'wave-list)
 
-Right now, this Wave client cannot use an actual Wave server, so until
-it can, you have to do the temporary step of downloading, compiling
-and running the wave-protocol FedOne test server. You can just skip
-this step by using a FedOne server someone else has made available.
-But, if you don't know of any, download the code by:
+Then configure your username:
 
-   hg clone https://wave-protocol.googlecode.com/hg/ wave-protocol
+(setq wave-client-user "mylogin")
 
-Modify wave-protocol/run-server.sh, and start a server.
+And now you can start viewing your waves:
 
+(wave-list-mode)
 
-Manually connecting to the Wave client
---------------------------------------
+That will connect you to the default wave instance (wave.google.com).
+To connect to a specific domain, such as sandbox, add this line as well:
 
-As part of development of the client, or for debugging purposes, you
-may need to start your connection to the Java client.  To connect, use
-start-repl.sh:
+(setq wave-client-domain "wavesandbox.com")
 
-start-repl.sh JAVA_BIN PORT
-
-This is made for use directly by the emacs library, which will pass
-the value of the path to the Java executable and the port on which the
-repl should run on.  This is convenient for emacs to pass it's
-user-configured variables in, but perhaps awkward for manual runs.
-
-Once you have run this, you should be able to telnet to your specified
-port to interact with the REPL.
+WARNING: This project currently utilizes the unpublished client/server
+protocol that wave.google.com's javascript uses to communicate with
+the wave servers. This is not a stable protocol supported by
+Google. This protocol is the Google Wave team's internal protocol and
+is under active development, so it may change at any time without
+regards for this or any other client.
 
 
-Architecture
-------------     
+Known issues
+------------
 
-+----------------+       +-------------------+
-| Wave server    |       | Clojure interface |
-|                +---+   | and REPL          |
-+----------------+   |   +-------------------+
-                     +---| FedOne client     |
-                 RPC     +------+------------+
-                                | TCP-based
-                                | REPL
-                         +------+------------+
-                         | wave-client       |
-                         | package           |
-                         +-------------------+
-                         + emacs             |
-                         +-------------------+
+Deleted blips are shown.
 
-This package has one binary executable, and one emacs library.  The
-executable uses Clojure to implement an API on top of wave-protocol's
-FedOne client.
+Blips are not shown in the same order as in the UI.
 
-The wave-client package for emacs will start the Clojure REPL binary,
-and connect to it by a simple TCP network connection to the REPL.

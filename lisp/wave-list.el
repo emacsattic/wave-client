@@ -31,12 +31,30 @@
 ;; mute them, and be able to get different lists (with searches).
 
 (require 'wave-client)
+(require 'wave-display)
 
 ;;; Code:
+(defface wave-list-author
+  '((((class color)) (:foreground "Green"))
+    (t (:italic t)))
+  "Face used for Wave authors."
+  :group 'wave-list-faces)
+
+(defface wave-list-unread-summary
+  '((t (:bold t)))
+  "Face used for unread Wave summaries"
+  :group 'wave-list-faces)
+
+(defface wave-list-read-summary
+  '(())
+  "Face used for read Wave summaries"
+  :group 'wave-list-faces)
+
 (defvar wave-list-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map "n" 'next-line)
     (define-key map "p" 'previous-line)
+    (define-key map "\r" 'wave-list-open)
     map)
   "Keybindings for wave-list mode.")
 
@@ -53,6 +71,18 @@ If no @ symbol is found, return FULL-USERNAME unmodified."
              (or (string-match "@" full-username)
                  (length full-username))))
 
+(defun wave-list-str-truncate (s max-width)
+  "Truncate string S to MAX-WIDTH chars."
+  (substring s 0 (min (length s) max-width)))
+
+(defun wave-list-open ()
+  "Open the wave at point in the list."
+  (interactive)
+  (switch-to-buffer
+   (wave-display (get-text-property (point) 'summary)
+                 (wave-get-wave
+                  (get-text-property (point) 'wave-id)))))
+
 (defun wave-list-render-wave-list (wave-list)
   "Render WAVE-LIST, a list of wave summary alists to a buffer.
 
@@ -61,21 +91,36 @@ Every wave takes up one line."
   (setq buffer-read-only nil)
   (erase-buffer)
   (dolist (summary-alist wave-list)
-    (insert
-     (let ((digest-length 50)
-           (participants-length 27))
-       (format
-        (concat "%-" (int-to-string digest-length)
-                "s [%-" (int-to-string participants-length)
-                "s]\n")
-        (cdr (assoc :digest summary-alist))
-        (let ((participants-str
-               (mapconcat 'wave-list-username-only
-                          (cdr (assoc :participants summary-alist))
-                          ", ")))
-          (substring participants-str 0
-                     (min (length participants-str)
-                          participants-length)))))))
+    (let ((num-unread (plist-get summary-alist :unread)))
+      (insert
+       (let* ((unread-length 5)
+              (author-length 15)
+              (digest-length
+               (- (window-width) author-length unread-length 2)))
+         (format
+          (concat "%-" (int-to-string unread-length)
+                  "s %-" (int-to-string digest-length)
+                  "s %-" (int-to-string author-length)
+                  "s\n")
+          (if (> num-unread 0) num-unread "")
+          (wave-list-str-truncate (plist-get summary-alist :digest)
+                                  digest-length)
+          (wave-list-str-truncate
+           (replace-regexp-in-string (concat "@"
+                                             (or wave-client-domain "googlewave.com"))
+                                     ""
+                                     (plist-get summary-alist :creator))
+           author-length))))
+      (let ((bol (save-excursion (beginning-of-line 0) (point)))
+            (pre-author (save-excursion (re-search-backward " \\w+")(point)))
+            (eol (save-excursion (end-of-line 0) (point))))
+        (add-text-properties bol pre-author `(face
+                                              ,(if (> num-unread 0)
+                                                   'wave-list-unread-summary
+                                                 'wave-list-read-summary)))
+        (add-text-properties (+ 1 pre-author) eol '(face wave-list-author))
+        (add-text-properties bol eol (list 'summary (plist-get summary-alist :digest)))
+        (add-text-properties bol eol (list 'wave-id (plist-get summary-alist :id))))))
   (goto-char (point-max))
   (backward-char)
   (kill-line)
@@ -87,7 +132,6 @@ Every wave takes up one line."
 Each line in the mode represents a Wave that can be opened.
 The wave client must be connected here."
   (interactive)
-  (wave-client-assert-connected)
   (set-buffer (get-buffer-create wave-list-buffer-name))
   (kill-all-local-variables)
   (setq major-mode 'wave-list-mode)
