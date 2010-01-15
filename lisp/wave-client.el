@@ -29,6 +29,13 @@
 ;; mode.  It is responsible for communicating with the Wave server.
 ;;
 ;; This backend uses a direct connection to https://wave.google.com.
+;;
+;; WARNING: This code utilizes the unpublished client/server protocol
+;; that wave.google.com's javascript uses to communicate with the wave
+;; servers. This is not a stable protocol supported by Google. This
+;; protocol is the Google Wave team's internal protocol and is under
+;; active development, so it may change at any time without regards
+;; for this or any other client.
 
 (require 'cl)
 (require 'json)

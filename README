@@ -30,10 +30,18 @@ To connect to a specific domain, such as sandbox, add this line as well:
 
 (setq wave-client-domain "wavesandbox.com")
 
+WARNING: This project currently utilizes the unpublished client/server
+protocol that wave.google.com's javascript uses to communicate with
+the wave servers. This is not a stable protocol supported by
+Google. This protocol is the Google Wave team's internal protocol and
+is under active development, so it may change at any time without
+regards for this or any other client.
+
+
 Known issues
 ------------
 
-Delete blips are shown.
+Deleted blips are shown.
 
 Blips are not shown in the same order as in the UI.
 
