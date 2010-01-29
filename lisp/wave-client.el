@@ -78,6 +78,15 @@ wave-client-debug-buffer")
   nil
   "The Wave current session")
 
+(defvar wave-client-gsession
+  nil
+  "The Wave client gsession, used for creating channels.")
+
+(defvar wave-client-rid
+  nil
+  "ID of the channel request.  A random number computed by us,
+incremented for every request.")
+
 (defconst wave-client-debug-buffer
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
@@ -160,9 +169,11 @@ that is a direct conversion from the JSON."
                                                      "HOSTED_OR_GOOGLE"
                                                    "GOOGLE"))
                                ("service" . "wave")
-                               ("source" . "emacs-wave")) '()))
+                               ("source" . "emacs-wave")) '() t))
           (goto-char (point-min))
           (search-forward-regexp "Auth=\\(.*\\)$")
+          (url-cookie-store "WAVE" (match-string 1) nil
+                            "wave.google.com" "/" t)
           (match-string 1))
       (unless (wave-client-kill-current-process-buffer)
         (setq wave-client-password nil)))))
@@ -174,13 +185,26 @@ otherwise do nothing."
                       (buffer-name))
     (kill-buffer)))
 
-(defun wave-client-curl (url data cookies)
+(defun wave-client-fetch (url data &optional method)
+  "Execute curl with a given URL and DATA params, return the
+buffer with the result."
+  (let ((url-request-data (mapconcat (lambda (c)
+                                       (concat
+                                        (url-hexify-string (car c))
+                                        "="
+                                        (url-hexify-string (cdr c))))
+                                     data "&"))
+        (url-request-method (or method "GET")))
+    (url-retrieve-synchronously url)))
+
+(defun wave-client-curl (url data cookies &optional post)
   "Execute curl with a given URL and cookie DATA, return the
 buffer with the result."
   (let* ((buf (generate-new-buffer wave-client-process-buf-name))
          (retval
           (apply 'call-process (append (list "curl" nil buf nil
                                              url "-f" "-s")
+                                       (unless post (list "-G"))
                                        (mapcan (lambda (c)
                                                  (list "-d"
                                                        (concat
@@ -324,6 +348,60 @@ into the format defined by `wave-inbox'."
   WAVE-PLIST, transforming it into the format defined by
   `wave-get-wave'"
   (mapcar 'wave-client-extract-wavelet (plist-get wave-plist :1)))
+
+(defun wave-client-populate-gsession ()
+  "Get the gsessionid that Wave uses to keep track of channels."
+  (save-excursion
+    (unwind-protect
+        (progn (set-buffer
+                (wave-client-curl (wave-client-get-url "/wfe/testLogin?gsessionid=unknown")
+                                  ;; we need something to trigger a curl post
+                                  '(("not" . "used"))
+                                  `(("WAVE" . ,wave-client-auth-cookie))
+                                  t))
+               (goto-char (point-min))
+               (re-search-forward "{")
+               (setq wave-client-gsession
+                     (plist-get (wave-client-json-read
+                                 (substring (buffer-string)
+                                            (- (point) 2)))
+                                :1)))
+            (wave-client-kill-current-process-buffer))))
+
+(defun wave-client-update-to-list (update-list kind)
+  "Transforms an update-list (given as an emacs array) to a list
+of updates with key KIND."
+  (let ((ordered-list
+         (mapcan (lambda (update)
+                   (let ((order (elt update 0))
+                         (data (elt update 1)))
+                     (when (string= (elt data 0) kind)
+                (list (cons order (elt data 1))))))
+                 update-list)))
+    (sort ordered-list (lambda (a b) (< (car a) (car b))))
+    (mapcar 'cdr ordered-list)))
+
+(defun wave-client-get-channel-sid ()
+  "Get the SID neceesary to open a Wave channel connection."
+  (setq wave-client-rid (abs (random 100000)))
+  (wave-client-populate-gsession)
+  (save-excursion
+    (unwind-protect
+        (progn
+          (set-buffer
+           (wave-client-fetch
+            (wave-client-get-url
+             (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                     "&VER=7&RID=" (int-to-string wave-client-rid)))
+            nil "POST"))
+          (goto-char (point-min))
+          ;; ignore chunk size
+          (re-search-forward "\\[")
+          (car (wave-client-update-to-list
+                (json-read-from-string (substring (buffer-string)
+                                                  (- (point) 2)))
+                "c")))
+      (wave-client-kill-current-process-buffer))))
 
 ;; Functions for the Wave mode to use:
 
