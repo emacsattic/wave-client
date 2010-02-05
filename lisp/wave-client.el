@@ -42,13 +42,13 @@
 (require 'url)
 (defgroup wave-client  nil
   "Wave client for emacs.")
-
+;;;###autoload
 (defcustom wave-client-user ""
   "Name of the Wave user to connect as.  Do NOT include the
 domain for hosted accounts such wavesandbox."
   :type 'string 
   :group 'wave-client)
-
+;;;###autoload
 (defcustom wave-client-password nil
   "Name of the Wave user to connect as."
   :type '(choice (const :tag "Query when needed" nil)
@@ -57,6 +57,7 @@ domain for hosted accounts such wavesandbox."
 
 ;; TODO(ahyatt): Use this when making connections, instead of
 ;; hardcoding to the default main instance of wave.google.com.
+;;;###autoload
 (defcustom wave-client-domain nil
   "Domain of the Wave server (such as `wavesandbox.com'), or nil
 for the default domain."
