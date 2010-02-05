@@ -191,8 +191,7 @@ that is a direct conversion from the JSON."
           (url-cookie-store "WAVE" (match-string 1) nil
                             "wave.google.com" "/" t)
           (match-string 1))
-      (unless (wave-client-kill-current-process-buffer)
-        (setq wave-client-password nil)))))
+        (setq wave-client-password nil))))
 
 (defun wave-client-kill-current-process-buffer ()
   "Kill the current buffer, if it is a temporary buffer,
