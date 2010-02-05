@@ -40,14 +40,19 @@
 (require 'cl)
 (require 'json)
 (require 'url)
+(defgroup wave-client  nil
+  "Wave client for emacs.")
 
 (defcustom wave-client-user ""
   "Name of the Wave user to connect as.  Do NOT include the
 domain for hosted accounts such wavesandbox."
+  :type 'string 
   :group 'wave-client)
 
 (defcustom wave-client-password nil
   "Name of the Wave user to connect as."
+  :type '(choice (const :tag "Query when needed" nil)
+				       (string  :tag "Password"))
   :group 'wave-client)
 
 ;; TODO(ahyatt): Use this when making connections, instead of
@@ -55,6 +60,8 @@ domain for hosted accounts such wavesandbox."
 (defcustom wave-client-domain nil
   "Domain of the Wave server (such as `wavesandbox.com'), or nil
 for the default domain."
+  :type  '(choice (const :tag "Query when needed" nil)
+				       (string  :tag "Domain"))
   :group 'wave-client)
 
 (defconst wave-client-process-buf-name
