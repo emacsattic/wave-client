@@ -162,22 +162,30 @@ that is a direct conversion from the JSON."
     (unwind-protect
         (progn
           (set-buffer
-           (wave-client-curl "https://www.google.com/accounts/ClientLogin"
-                             `(("Email" .
-                                ,(concat wave-client-user
-                                         (when wave-client-domain
-                                           (concat "@" wave-client-domain))))
-                               ("Passwd" .
-                                ,(or wave-client-password
-                                     (let ((password
-                                            (read-passwd "Password: ")))
-                                       (setq wave-client-password password)
-                                       password)))
-                               ("accountType" . ,(if wave-client-domain
-                                                     "HOSTED_OR_GOOGLE"
-                                                   "GOOGLE"))
-                               ("service" . "wave")
-                               ("source" . "emacs-wave")) '() t))
+           (wave-client-curl
+            "https://www.google.com/accounts/ClientLogin"
+            `(("Email" .
+               ,(concat wave-client-user
+                        (when wave-client-domain
+                          (concat "@" wave-client-domain))))
+              ("Passwd" .
+               ,(or
+                 wave-client-password
+                 (let
+                     ((password
+                       (read-passwd
+                        (format 
+                         "Password for %s: "
+                         (concat wave-client-user
+                                 (when wave-client-domain
+                                   (concat "@" wave-client-domain)))))))
+                   (setq wave-client-password password)
+                   password)))
+              ("accountType" . ,(if wave-client-domain
+                                    "HOSTED_OR_GOOGLE"
+                                  "GOOGLE"))
+              ("service" . "wave")
+              ("source" . "emacs-wave")) '() t))
           (goto-char (point-min))
           (search-forward-regexp "Auth=\\(.*\\)$")
           (url-cookie-store "WAVE" (match-string 1) nil
