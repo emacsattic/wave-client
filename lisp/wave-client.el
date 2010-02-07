@@ -48,12 +48,6 @@
 domain for hosted accounts such wavesandbox."
   :type 'string 
   :group 'wave-client)
-;;;###autoload
-(defcustom wave-client-password nil
-  "Name of the Wave user to connect as."
-  :type '(choice (const :tag "Query when needed" nil)
-				       (string  :tag "Password"))
-  :group 'wave-client)
 
 ;; TODO(ahyatt): Use this when making connections, instead of
 ;; hardcoding to the default main instance of wave.google.com.
@@ -130,8 +124,7 @@ to the end, if given.  Uses `wave-client-domain'."
   are switching domains."
   (interactive)
   (setq wave-client-auth-cookie nil)
-  (setq wave-client-session nil)
-  (setq wave-client-password nil))
+  (setq wave-client-session nil))
 
 (defun wave-client-get-wave-raw (wave-id)
   "Get the wave given from the WAVE-ID, as a plist data structure
@@ -158,6 +151,9 @@ that is a direct conversion from the JSON."
 
 (defun wave-client-get-auth-cookie ()
   "Return the auth cookie for this user."
+  (unless wave-client-user
+    (error (concat "You need to at least set `wave-client-user' "
+                   "before logging into Wave.")))
   (save-excursion
     (unwind-protect
         (progn
@@ -169,18 +165,12 @@ that is a direct conversion from the JSON."
                         (when wave-client-domain
                           (concat "@" wave-client-domain))))
               ("Passwd" .
-               ,(or
-                 wave-client-password
-                 (let
-                     ((password
-                       (read-passwd
-                        (format 
-                         "Password for %s: "
-                         (concat wave-client-user
-                                 (when wave-client-domain
-                                   (concat "@" wave-client-domain)))))))
-                   (setq wave-client-password password)
-                   password)))
+               ,(read-passwd
+                 (format
+                  "Password for %s: "
+                  (concat wave-client-user
+                          (when wave-client-domain
+                            (concat "@" wave-client-domain))))))
               ("accountType" . ,(if wave-client-domain
                                     "HOSTED_OR_GOOGLE"
                                   "GOOGLE"))
@@ -190,8 +180,7 @@ that is a direct conversion from the JSON."
           (search-forward-regexp "Auth=\\(.*\\)$")
           (url-cookie-store "WAVE" (match-string 1) nil
                             "wave.google.com" "/" t)
-          (match-string 1))
-        (setq wave-client-password nil))))
+          (match-string 1)))))
 
 (defun wave-client-kill-current-process-buffer ()
   "Kill the current buffer, if it is a temporary buffer,
