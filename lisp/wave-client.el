@@ -40,21 +40,23 @@
 (require 'cl)
 (require 'json)
 (require 'url)
-
+(defgroup wave-client  nil
+  "Wave client for emacs.")
+;;;###autoload
 (defcustom wave-client-user ""
   "Name of the Wave user to connect as.  Do NOT include the
 domain for hosted accounts such wavesandbox."
-  :group 'wave-client)
-
-(defcustom wave-client-password nil
-  "Name of the Wave user to connect as."
+  :type 'string 
   :group 'wave-client)
 
 ;; TODO(ahyatt): Use this when making connections, instead of
 ;; hardcoding to the default main instance of wave.google.com.
+;;;###autoload
 (defcustom wave-client-domain nil
   "Domain of the Wave server (such as `wavesandbox.com'), or nil
 for the default domain."
+  :type  '(choice (const :tag "Query when needed" nil)
+				       (string  :tag "Domain"))
   :group 'wave-client)
 
 (defconst wave-client-process-buf-name
@@ -122,8 +124,7 @@ to the end, if given.  Uses `wave-client-domain'."
   are switching domains."
   (interactive)
   (setq wave-client-auth-cookie nil)
-  (setq wave-client-session nil)
-  (setq wave-client-password nil))
+  (setq wave-client-session nil))
 
 (defun wave-client-get-wave-raw (wave-id)
   "Get the wave given from the WAVE-ID, as a plist data structure
@@ -139,33 +140,36 @@ that is a direct conversion from the JSON."
 
 (defun wave-client-get-auth-cookie ()
   "Return the auth cookie for this user."
+  (unless wave-client-user
+    (error (concat "You need to at least set `wave-client-user' "
+                   "before logging into Wave.")))
   (save-excursion
     (unwind-protect
         (progn
           (set-buffer
-           (wave-client-curl "https://www.google.com/accounts/ClientLogin"
-                             `(("Email" .
-                                ,(concat wave-client-user
-                                         (when wave-client-domain
-                                           (concat "@" wave-client-domain))))
-                               ("Passwd" .
-                                ,(or wave-client-password
-                                     (let ((password
-                                            (read-passwd "Password: ")))
-                                       (setq wave-client-password password)
-                                       password)))
-                               ("accountType" . ,(if wave-client-domain
-                                                     "HOSTED_OR_GOOGLE"
-                                                   "GOOGLE"))
-                               ("service" . "wave")
-                               ("source" . "emacs-wave")) '() t))
+           (wave-client-curl
+            "https://www.google.com/accounts/ClientLogin"
+            `(("Email" .
+               ,(concat wave-client-user
+                        (when wave-client-domain
+                          (concat "@" wave-client-domain))))
+              ("Passwd" .
+               ,(read-passwd
+                 (format
+                  "Password for %s: "
+                  (concat wave-client-user
+                          (when wave-client-domain
+                            (concat "@" wave-client-domain))))))
+              ("accountType" . ,(if wave-client-domain
+                                    "HOSTED_OR_GOOGLE"
+                                  "GOOGLE"))
+              ("service" . "wave")
+              ("source" . "emacs-wave")) '() t))
           (goto-char (point-min))
           (search-forward-regexp "Auth=\\(.*\\)$")
           (url-cookie-store "WAVE" (match-string 1) nil
                             "wave.google.com" "/" t)
-          (match-string 1))
-      (unless (wave-client-kill-current-process-buffer)
-        (setq wave-client-password nil)))))
+          (match-string 1)))))
 
 (defun wave-client-kill-current-process-buffer ()
   "Kill the current buffer, if it is a temporary buffer,
