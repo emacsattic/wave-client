@@ -178,8 +178,10 @@
     (wave-display-users (plist-get wavelet :participants)
                         'wave-wavelet-participants)
     (insert "\n")
-    (wave-display-blip (plist-get wavelet :root-blip-id)
-                       (plist-get wavelet :blips) 0)
+    (let* ((blips (plist-get wavelet :blips))
+           (max-lisp-eval-depth (+ max-lisp-eval-depth
+                                   (* 8 (hash-table-count blips)))))
+      (wave-display-blip (plist-get wavelet :root-blip-id) blips 0))
     (setq wave-display-blips (sort wave-display-blips
                                   (lambda (a b)
                                     (< (cadr a)
