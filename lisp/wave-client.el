@@ -132,22 +132,11 @@ that is a direct conversion from the JSON."
   (unless (and wave-client-auth-cookie wave-client-session)
     ;; To re-fetch both auth and session
     (wave-client-get-waves))
-  (save-excursion
-    (unwind-protect
-        (progn
-          (set-buffer
-           (wave-client-curl
-            (wave-client-get-url
-             (format "/wfe/fetch/%s/%s?v=3"
-                     (url-hexify-string wave-id)
-                     (plist-get (plist-get wave-client-session :userProfile)
-                                :id))) '()
-                                `(("WAVE" . ,wave-client-auth-cookie))))
-          (goto-char (point-min))
-          (re-search-forward "{")
-          (wave-client-json-read (substring (buffer-string)
-					    (- (point) 2))))
-      (wave-client-kill-current-process-buffer))))
+  (wave-client-get-json
+   (format "/wfe/fetch/%s/%s?v=3"
+           (url-hexify-string wave-id)
+           (plist-get (plist-get wave-client-session :userProfile)
+                      :id))))
 
 (defun wave-client-get-auth-cookie ()
   "Return the auth cookie for this user."
@@ -353,24 +342,32 @@ into the format defined by `wave-inbox'."
   `wave-get-wave'"
   (mapcar 'wave-client-extract-wavelet (plist-get wave-plist :1)))
 
-(defun wave-client-populate-gsession ()
-  "Get the gsessionid that Wave uses to keep track of channels."
+(defun wave-client-get-json (url-suffix &optional method)
+  "Return the JSON from a Wave servlet with URL-SUFFIX.  METHOD
+should 'get or 'post.  Not specified will default to 'get."
   (save-excursion
     (unwind-protect
-        (progn (set-buffer
-                (wave-client-curl (wave-client-get-url "/wfe/testLogin?gsessionid=unknown")
-                                  ;; we need something to trigger a curl post
-                                  '(("not" . "used"))
-                                  `(("WAVE" . ,wave-client-auth-cookie))
-                                  t))
-               (goto-char (point-min))
-               (re-search-forward "{")
-               (setq wave-client-gsession
-                     (plist-get (wave-client-json-read
-                                 (substring (buffer-string)
-                                            (- (point) 2)))
-                                :1)))
-            (wave-client-kill-current-process-buffer))))
+        (progn
+          (set-buffer
+           (wave-client-curl
+            (wave-client-get-url url-suffix)
+            ;; we need something to trigger a curl post
+            (when (eq method 'post) '(("not" . "used")))
+            `(("WAVE" . ,wave-client-auth-cookie))
+            (eq method 'post)))
+          (goto-char (point-min))
+          (re-search-forward "{\\|\\[")
+          (wave-client-json-read
+           (substring (buffer-string)
+                      (- (point) 2))))
+      (wave-client-kill-current-process-buffer))))
+
+(defun wave-client-populate-gsession ()
+  "Get the gsessionid that Wave uses to keep track of channels."
+  (setq wave-client-session
+        (plist-get
+         (wave-client-get-json "/wfe/testLogin?gsessionid=unknown" 'post)
+         :1)))
 
 (defun wave-client-update-to-list (update-list kind)
   "Transforms an update-list (given as an emacs array) to a list
@@ -389,23 +386,11 @@ of updates with key KIND."
   "Get the SID neceesary to open a Wave channel connection."
   (setq wave-client-rid (abs (random 100000)))
   (wave-client-populate-gsession)
-  (save-excursion
-    (unwind-protect
-        (progn
-          (set-buffer
-           (wave-client-fetch
-            (wave-client-get-url
-             (concat "/wfe/channel?gsessionid=" wave-client-gsession
-                     "&VER=7&RID=" (int-to-string wave-client-rid)))
-            nil "POST"))
-          (goto-char (point-min))
-          ;; ignore chunk size
-          (re-search-forward "\\[")
-          (car (wave-client-update-to-list
-                (json-read-from-string (substring (buffer-string)
-                                                  (- (point) 2)))
-                "c")))
-      (wave-client-kill-current-process-buffer))))
+  (car (wave-client-update-to-list
+        (wave-client-get-json
+         (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                 "&VER=7&RID=" (int-to-string wave-client-rid)) 'post)
+        "c")))
 
 ;; Functions for the Wave mode to use:
 
