@@ -364,7 +364,7 @@ should 'get or 'post.  Not specified will default to 'get."
 
 (defun wave-client-populate-gsession ()
   "Get the gsessionid that Wave uses to keep track of channels."
-  (setq wave-client-session
+  (setq wave-client-gsession
         (plist-get
          (wave-client-get-json "/wfe/testLogin?gsessionid=unknown" 'post)
          :1)))
