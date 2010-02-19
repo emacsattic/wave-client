@@ -130,7 +130,8 @@ Every wave takes up one line."
   "Major mode for navigating a list of waves.
 
 Each line in the mode represents a Wave that can be opened.
-The wave client must be connected here."
+The wave client must be connected here.
+\\{wave-list-mode-map}"
   (interactive)
   (set-buffer (get-buffer-create wave-list-buffer-name))
   (kill-all-local-variables)

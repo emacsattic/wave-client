@@ -269,7 +269,9 @@ into the format defined by `wave-inbox'."
 
 (defun wave-client-extract-boundary (boundary)
   "Extract information about the boundary"
-  (let ((result '(boundary)))
+  ;; We use @ because @ is not a valid first character in an XML name,
+  ;; so there will be no ambiguity with element starts.
+  (let ((result '(@boundary)))
     (if (plist-get boundary :1)
         (add-to-list 'result 'empty) t)
     (if (> (length (plist-get boundary :2)) 0)
@@ -286,6 +288,12 @@ into the format defined by `wave-inbox'."
                             (plist-get boundary :3))) t))
     result))
 
+(defun wave-client-extract-attributes (raw-attributes)
+  (mapcan (lambda (raw-attr)
+            (list (intern (plist-get raw-attr :1))
+                  (plist-get raw-attr :2)))
+          raw-attributes))
+
 (defun wave-client-extract-blip (blip-plist)
   "Extract information about a single blip from the raw
   BLIP-PLIST."
@@ -293,23 +301,22 @@ into the format defined by `wave-inbox'."
         :authors (plist-get blip-plist :7)
         :modified-time
               (wave-client-extract-long (plist-get blip-plist :3))
-        :ops (mapcar
-              (lambda (token)
-                (let ((start-element (plist-get token :4))
-                      (text (plist-get token :2))
-                      (end-element (plist-get token :5))
-                      (boundary (plist-get token :1)))
-                  (cond (start-element
-                         (intern (plist-get start-element :1)))
-                        (text text)
-                        (end-element 'end)
-                        (boundary
-                         (wave-client-extract-boundary boundary))
-                        (t 'unknown))))
-              (plist-get (plist-get blip-plist :16) :2))
-        :children (mapcar (lambda (child)
-                            (plist-get child :6))
-              (plist-get blip-plist :5))))
+        :content (mapcar
+                  (lambda (token)
+                    (let ((start-element (plist-get token :4))
+                          (text (plist-get token :2))
+                          (end-element (plist-get token :5))
+                          (boundary (plist-get token :1)))
+                      (cond (start-element
+                             (list (intern (plist-get start-element :1))
+                                   (wave-client-extract-attributes
+                                    (plist-get start-element :2))))
+                            (text text)
+                            (end-element 'end)
+                            (boundary
+                             (wave-client-extract-boundary boundary))
+                            (t 'unknown))))
+                  (plist-get (plist-get blip-plist :16) :2))))
 
 (defun wave-client-extract-long (long)
   "From a 2-byte long, extract a single long integer"
