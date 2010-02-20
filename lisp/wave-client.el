@@ -40,7 +40,7 @@
 (require 'cl)
 (require 'json)
 (require 'url)
-(defgroup wave-client  nil
+(defgroup wave-client nil
   "Wave client for emacs.")
 ;;;###autoload
 (defcustom wave-client-user ""
@@ -215,7 +215,7 @@ buffer with the result."
                                             (url-hexify-string (cdr c))))
                                          cookies "; "))))))
     (when (= retval 22)
-        (error "HTTP error loading page %s" url))
+      (error "HTTP error loading page %s" url))
     buf))
 
 (defun wave-client-json-read (text &optional do-extra-munging object-type)

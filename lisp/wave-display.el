@@ -63,6 +63,7 @@
 
 (defvar wave-display-blips '()
   "Buffer-local blip to location alist.")
+(make-variable-buffer-local 'wave-display-blips)
 
 (defun wave-display-format-user (user)
   "Given a USER such as 'ahyatt@googlewave.com', return a
@@ -81,8 +82,9 @@
       (while (and (cdr blips) (>= (point) (cadadr blips)))
         (setq blips (cdr blips)))
       ;; If we're at the end, just don't do anything.
-      (overlay-put (make-overlay (cadar blips) (cddar blips))
-                   'face 'hl-line))))
+      (when blips
+        (overlay-put (make-overlay (cadar blips) (cddar blips))
+                     'face 'hl-line)))))
 
 (defun wave-display-next-blip ()
   "Moves to the next blip from the cursor."
@@ -92,7 +94,7 @@
       (setq blips (cdr blips)))
     ;; If we're at the end, just don't do anything.
     (when blips
-        (goto-char (cadar blips)))))
+      (goto-char (cadar blips)))))
 
 (defun wave-display-previous-blip ()
   "Moves to the next blip from the cursor."
@@ -102,7 +104,7 @@
       (setq blips (cdr blips)))
     ;; If we're at the end, just don't do anything.
     (when blips
-        (goto-char (cadar blips)))))
+      (goto-char (cadar blips)))))
 
 (defun wave-display-users (users face)
   "Display a list of USERS, using FACE styling."
@@ -258,7 +260,6 @@ wave-list-mode.  Returns the new buffer."
     (set-buffer (get-buffer-create buf-name))
     (setq buffer-read-only nil)
     (erase-buffer)
-    (make-variable-buffer-local 'wave-display-blips)
     (setq wave-display-blips nil)
     (dolist (wavelet wave-data)
       (wave-display-wavelet wavelet))
@@ -266,20 +267,18 @@ wave-list-mode.  Returns the new buffer."
     (wave-display-mode)
     (current-buffer)))
 
-(defun wave-display-mode ()
-  "Turn on wave-display mode.
-\\{wave-mode-map}"
-  (setq major-mode 'wave-display-mode)
-  (setq mode-name "Wave")
+(define-derived-mode wave-display-mode nil "Wave"
+  "Mode for displaying a wave,"
+  :group 'wave-display
   (use-local-map wave-mode-map)
   (buffer-disable-undo)
   (setq buffer-read-only t
         show-trailing-whitespace nil
         truncate-lines t
-        selective-display t
-        selective-display-ellipses t)
-  (add-hook 'post-command-hook 'wave-display-highlight-blip t t)
-  (run-mode-hooks))
+        ;;selective-display t
+        ;;selective-display-ellipses t
+        )
+  (add-hook 'post-command-hook 'wave-display-highlight-blip t t))
 
 (provide 'wave-display)
 

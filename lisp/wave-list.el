@@ -60,6 +60,7 @@
 
 (defvar wave-list-waves ()
   "The data rendered in the list of waves.")
+(make-variable-buffer-local 'wave-list-waves)
 
 (defconst wave-list-buffer-name "*Wave List*")
 
@@ -138,7 +139,6 @@ The wave client must be connected here.
   (setq major-mode 'wave-list-mode)
   (setq mode-name "Wave List")
   (use-local-map wave-list-mode-map)
-  (make-variable-buffer-local 'wave-list-waves)
   (wave-list-render-wave-list (wave-inbox))
   (buffer-disable-undo)
   (setq buffer-read-only t
