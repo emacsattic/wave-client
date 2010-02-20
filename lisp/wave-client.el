@@ -37,15 +37,18 @@
 ;; active development, so it may change at any time without regards
 ;; for this or any other client.
 
-(require 'cl)
-(require 'json)
-(require 'url)
+(eval-and-compile
+  (require 'cl)
+  (require 'json)
+  (require 'url))
+
 (defgroup wave-client nil
   "Wave client for emacs.")
+
 ;;;###autoload
 (defcustom wave-client-user ""
   "Name of the Wave user to connect as.  Do NOT include the
-domain for hosted accounts such wavesandbox."
+domain for hosted accounts such as wavesandbox."
   :type 'string 
   :group 'wave-client)
 
@@ -56,7 +59,7 @@ domain for hosted accounts such wavesandbox."
   "Domain of the Wave server (such as `wavesandbox.com'), or nil
 for the default domain."
   :type  '(choice (const :tag "Query when needed" nil)
-				       (string  :tag "Domain"))
+                  (string  :tag "Domain"))
   :group 'wave-client)
 
 (defconst wave-client-process-buf-name
@@ -115,8 +118,8 @@ to the end, if given.  Uses `wave-client-domain'."
     (error "wave-client-domain empty, should probably be nil"))
   (format "https://wave.google.com%s%s"
           (if wave-client-domain
-                        (concat "/a/" wave-client-domain)
-                      "/wave")
+              (concat "/a/" wave-client-domain)
+            "/wave")
           (or path "/")))
 
 (defun wave-client-reset ()
@@ -195,25 +198,25 @@ buffer with the result."
 buffer with the result."
   (let* ((buf (generate-new-buffer wave-client-process-buf-name))
          (retval
-          (apply 'call-process (append (list "curl" nil buf nil
-                                             url "-f" "-s")
-                                       (unless post (list "-G"))
-                                       (mapcan (lambda (c)
-                                                 (list "-d"
-                                                       (concat
-                                                        (url-hexify-string (car c))
-                                                        "="
-                                                        (url-hexify-string (cdr c)))))
-                                               data)
-                                       (list
-                                        "-b"
-                                        (mapconcat
-                                         (lambda (c)
-                                           (concat
-                                            (url-hexify-string (car c))
-                                            "="
-                                            (url-hexify-string (cdr c))))
-                                         cookies "; "))))))
+          (apply 'call-process "curl" nil buf nil
+                 (nconc (list url "-f" "-s")
+                        (unless post (list "-G"))
+                        (mapcan (lambda (c)
+                                  (list "-d"
+                                        (concat
+                                         (url-hexify-string (car c))
+                                         "="
+                                         (url-hexify-string (cdr c)))))
+                                data)
+                        (list
+                         "-b"
+                         (mapconcat
+                          (lambda (c)
+                            (concat
+                             (url-hexify-string (car c))
+                             "="
+                             (url-hexify-string (cdr c))))
+                          cookies "; "))))))
     (when (= retval 22)
       (error "HTTP error loading page %s" url))
     buf))
@@ -283,8 +286,8 @@ into the format defined by `wave-inbox'."
                            (mapcar
                             (lambda (update)
                               (list :key (plist-get update :1)
-                                :oldvalue (plist-get update :2)
-                                :newvalue (plist-get update :3)))
+                                    :oldvalue (plist-get update :2)
+                                    :newvalue (plist-get update :3)))
                             (plist-get boundary :3))) t))
     result))
 
@@ -299,8 +302,7 @@ into the format defined by `wave-inbox'."
   BLIP-PLIST."
   (list :blip-id (plist-get blip-plist :1)
         :authors (plist-get blip-plist :7)
-        :modified-time
-              (wave-client-extract-long (plist-get blip-plist :3))
+        :modified-time (wave-client-extract-long (plist-get blip-plist :3))
         :content (mapcar
                   (lambda (token)
                     (let ((start-element (plist-get token :4))
@@ -330,14 +332,13 @@ into the format defined by `wave-inbox'."
          (metadata (plist-get wavelet :1))
          (blips (plist-get wavelet :2))
          (blips-hashtable (make-hash-table)))
-    (dolist (blip (append blips '()))
-      (let ((extracted-blip (wave-client-extract-blip blip)))
-        (puthash (intern (plist-get extracted-blip :blip-id))
-                 extracted-blip blips-hashtable)))
+    (loop for blip across blips do
+          (let ((extracted-blip (wave-client-extract-blip blip)))
+            (puthash (intern (plist-get extracted-blip :blip-id))
+                     extracted-blip blips-hashtable)))
     (list :participants (plist-get metadata :5)
           :creator (plist-get metadata :3)
-          :wave-id (plist-get metadata :1)
-          :wavelet-id (plist-get metadata :2)
+          :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
           :creation-time (wave-client-extract-long
                           (plist-get metadata :4))
           :root-blip-id (plist-get metadata :6)
@@ -384,7 +385,7 @@ of updates with key KIND."
                    (let ((order (elt update 0))
                          (data (elt update 1)))
                      (when (string= (elt data 0) kind)
-                (list (cons order (elt data 1))))))
+                       (list (cons order (elt data 1))))))
                  update-list)))
     (sort ordered-list (lambda (a b) (< (car a) (car b))))
     (mapcar 'cdr ordered-list)))
