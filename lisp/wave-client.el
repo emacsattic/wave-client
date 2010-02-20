@@ -300,8 +300,9 @@ into the format defined by `wave-inbox'."
 (defun wave-client-extract-blip (blip-plist)
   "Extract information about a single blip from the raw
   BLIP-PLIST."
-  (list :blip-id (plist-get blip-plist :1)
+  (list :blip-id (intern (plist-get blip-plist :1))
         :authors (plist-get blip-plist :7)
+        :modified-version (wave-client-extract-long (plist-get blip-plist :15))
         :modified-time (wave-client-extract-long (plist-get blip-plist :3))
         :content (mapcar
                   (lambda (token)
@@ -322,8 +323,10 @@ into the format defined by `wave-inbox'."
 
 (defun wave-client-extract-long (long)
   "From a 2-byte long, extract a single long integer"
-  ;; TODO(ahyatt) Don't know how to do this yet
-  0)
+  (if (zerop (aref long 1))
+      (aref long 0)
+    ;; TODO(ahyatt): handle this case; perhaps use a float?
+    nil))
 
 (defun wave-client-extract-wavelet (wavelet-plist)
   "Extract information about a wavelet from the raw WAVE-PLIST,
@@ -334,14 +337,13 @@ into the format defined by `wave-inbox'."
          (blips-hashtable (make-hash-table)))
     (loop for blip across blips do
           (let ((extracted-blip (wave-client-extract-blip blip)))
-            (puthash (intern (plist-get extracted-blip :blip-id))
+            (puthash (plist-get extracted-blip :blip-id)
                      extracted-blip blips-hashtable)))
     (list :participants (plist-get metadata :5)
           :creator (plist-get metadata :3)
           :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
           :creation-time (wave-client-extract-long
                           (plist-get metadata :4))
-          :root-blip-id (plist-get metadata :6)
           :blips blips-hashtable)))
 
 (defun wave-client-extract-wave (wave-plist)

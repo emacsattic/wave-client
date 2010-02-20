@@ -81,8 +81,7 @@ If no @ symbol is found, return FULL-USERNAME unmodified."
   (interactive)
   (switch-to-buffer
    (wave-display (get-text-property (point) 'summary)
-                 (wave-get-wave
-                  (get-text-property (point) 'wave-id)))))
+                 (get-text-property (point) 'wave-id))))
 
 (defun wave-list-render-wave-list (wave-list)
   "Render WAVE-LIST, a list of wave summary alists to a buffer.
