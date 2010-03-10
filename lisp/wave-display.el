@@ -76,7 +76,7 @@
     (define-key map "p" 'wave-display-previous-blip)
     (define-key map "R" 'wave-display-toggle-debugging-info)
     (define-key map "g" 'wave-display-refresh)
-    (define-key map "q" 'bury-buffer)
+    (define-key map "q" 'wave-kill-wave-display)
     map)
   "Keybindings for wave mode.")
 
@@ -101,6 +101,14 @@
   (blips (make-hash-table))
   (all nil)
   (participants nil))
+
+(defun wave-kill-wave-display ()
+  "Kill the wave display buffer, bringing the wave list back."
+  (interactive)
+  (kill-buffer)
+  (let ((list-buffer (get-buffer wave-list-buffer-name)))
+    (when list-buffer
+      (switch-to-buffer list-buffer))))
 
 (defun wave-display-toggle-debugging-info ()
   (interactive)
