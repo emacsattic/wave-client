@@ -228,11 +228,13 @@ buffer with the result."
   subsitute \" for \' and make sure each key is in quotes.  This
   is not a great thing to do, but we need it for the kind of JSON
   that Wave returns on HTML pages."
-  (let ((json-object-type (or object-type 'plist))
-        (json-key-type nil))
+  (let* ((json-object-type (or object-type 'plist))
+         (json-key-type nil)
+         (text (or (replace-regexp-in-string "\n" "" text)))
+         (text (or (replace-regexp-in-string ",," ",\"\"," text))))
     (json-read-from-string
      (if do-extra-munging
-	 (let ((double-quoted-text (or (replace-regexp-in-string "'" "\"" text)
+	 (let* ((double-quoted-text (or (replace-regexp-in-string "'" "\"" text)
 				       text)))
 	   (or (replace-regexp-in-string
 		"\\([{,]\\)\\([[:word:]_]+\\):"
@@ -392,15 +394,41 @@ of updates with key KIND."
     (sort ordered-list (lambda (a b) (< (car a) (car b))))
     (mapcar 'cdr ordered-list)))
 
+(defun wave-client-get-inc-rid ()
+  "Get and increment the rid as a string.  This returns the rid
+before it is incremented."
+  (incf wave-client-rid)
+  (int-to-string (- wave-client-rid 1)))
+
 (defun wave-client-get-channel-sid ()
   "Get the SID neceesary to open a Wave channel connection."
   (setq wave-client-rid (abs (random 100000)))
-  (wave-client-populate-gsession)
+  (unless wave-client-gsession
+    (wave-client-populate-gsession))
   (car (wave-client-update-to-list
         (wave-client-get-json
          (concat "/wfe/channel?gsessionid=" wave-client-gsession
-                 "&VER=7&RID=" (int-to-string wave-client-rid)) 'post)
+                 "&VER=7&RID=" (wave-client-get-inc-rid)) 'post)
         "c")))
+
+(defun wave-client-post-to-browser-channel (data)
+  "Post DATA to a browser-channel.  DATA is a list of data pieces
+to post."
+  (let* ((sid (wave-client-get-channel-sid))
+         (url (wave-client-get-url
+               (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                       "&VER=8&SID=" sid "&RID=" (wave-client-get-inc-rid))))
+         (i 0))
+    (wave-client-curl url (list
+                           (cons "count" (int-to-string (length data)))
+                           (mapcar (lambda (d)
+                                     (let ((retval
+                                            (cons
+                                             (concat "req" (int-to-string i)
+                                                     "_key")
+                                                  d)))
+                                       (incf i))) data))
+                      `(("WAVE" . ,wave-client-auth-cookie)) t)))
 
 ;; Functions for the Wave mode to use:
 
