@@ -443,6 +443,7 @@
 
 (defun wave-display-process-m/read (content)
   "Populates `wave-display-wave-read-state' from CONTENT."
+  (message "m-read: %s" content)
   (let ((wavelet-read-state nil)
         (blip nil)
         (participants nil)

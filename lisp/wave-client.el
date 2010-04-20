@@ -92,9 +92,22 @@ wave-client-debug-buffer")
   "ID of the channel request.  A random number computed by us,
 incremented for every request.")
 
+(defvar wave-client-identifier
+  nil
+  "A random string used as a client identifier.")
+
+(defvar wave-client-request-number 0
+  "The request number, which monotonically increases.")
+
 (defconst wave-client-debug-buffer
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
+
+(defun wave-client-email-address ()
+  "Return the email address of the user."
+  (if (string-match "@" wave-client-user)
+      wave-client-user
+    (concat wave-client-user "@" (or wave-client-domain "gmail.com"))))
 
 (defun wave-client-debug (str)
   "Send STR to the `wave-client-debug-buffer', with newline."
@@ -429,6 +442,18 @@ to post."
                                                   d)))
                                        (incf i))) data))
                       `(("WAVE" . ,wave-client-auth-cookie)) t)))
+
+(defun wave-client-send-delta (delta)
+  "Send DELTA to the wave server."
+  (unless wave-client-identifier
+    ;; TODO(ahyatt): The identifier should be a random string, but for
+    ;; now, we just have it be a random number string, which is
+    ;; somewhat lame.
+    (setq wave-client-identifier (int-to-string (random 100000))))
+  (wave-client-post-to-browser-channel
+   (list (json-encode-list (:a wave-client-identifier
+                               :r (incf wave-client-request-num)
+                               :t 1100 :p json-proto)))))
 
 ;; Functions for the Wave mode to use:
 
