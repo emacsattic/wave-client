@@ -52,14 +52,18 @@ domain for hosted accounts such as wavesandbox."
   :type 'string 
   :group 'wave-client)
 
-;; TODO(ahyatt): Use this when making connections, instead of
-;; hardcoding to the default main instance of wave.google.com.
 ;;;###autoload
 (defcustom wave-client-domain nil
   "Domain of the Wave server (such as `wavesandbox.com'), or nil
 for the default domain."
   :type  '(choice (const :tag "Query when needed" nil)
                   (string  :tag "Domain"))
+  :group 'wave-client)
+
+(defcustom wave-client-server
+  "https://wave.google.com"
+  "The server url, without any trailing backslash"
+  :type 'string
   :group 'wave-client)
 
 (defconst wave-client-process-buf-name
@@ -96,12 +100,16 @@ incremented for every request.")
   nil
   "A random string used as a client identifier.")
 
-(defvar wave-client-request-number 0
+(defvar wave-client-request-num 0
   "The request number, which monotonically increases.")
 
 (defconst wave-client-debug-buffer
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
+
+(defconst wave-client-current-array-num 0
+  "The array number, monotonically increasing as we read more
+  data from the browser channel.")
 
 (defun wave-client-email-address ()
   "Return the email address of the user."
@@ -129,7 +137,8 @@ incremented for every request.")
 to the end, if given.  Uses `wave-client-domain'."
   (when (eq wave-client-domain "")
     (error "wave-client-domain empty, should probably be nil"))
-  (format "https://wave.google.com%s%s"
+  (format "%s%s%s"
+          wave-client-server
           (if wave-client-domain
               (concat "/a/" wave-client-domain)
             "/wave")
@@ -359,6 +368,7 @@ into the format defined by `wave-inbox'."
           :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
           :creation-time (wave-client-extract-long
                           (plist-get metadata :4))
+          :version (wave-client-extract-long (plist-get metadata :7))
           :blips blips-hashtable)))
 
 (defun wave-client-extract-wave (wave-plist)
@@ -432,16 +442,28 @@ to post."
                (concat "/wfe/channel?gsessionid=" wave-client-gsession
                        "&VER=8&SID=" sid "&RID=" (wave-client-get-inc-rid))))
          (i 0))
-    (wave-client-curl url (list
-                           (cons "count" (int-to-string (length data)))
+    (wave-client-curl url (append
+                           (list (cons "count" (int-to-string (length data)))) 
                            (mapcar (lambda (d)
                                      (let ((retval
                                             (cons
                                              (concat "req" (int-to-string i)
                                                      "_key")
                                                   d)))
-                                       (incf i))) data))
+                                       (incf i)
+                                       retval)) data))
                       `(("WAVE" . ,wave-client-auth-cookie)) t)))
+
+(defun wave-client-get-browser-channel ()
+  "Get the response from the latest browser-channel"
+  (let* ((sid (wave-client-get-channel-sid))
+         (url (wave-client-get-url
+               (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                       "&VER=8&SID=" sid "&AID="
+                       (int-to-string wave-client-current-array-num)
+                       "&RID=rpc&CI=0&TYPE=xmlhttp&t=1"))))
+    (wave-client-curl url '()
+                      `(("WAVE" . ,wave-client-auth-cookie)))))
 
 (defun wave-client-send-delta (delta)
   "Send DELTA to the wave server."
@@ -451,9 +473,9 @@ to post."
     ;; somewhat lame.
     (setq wave-client-identifier (int-to-string (random 100000))))
   (wave-client-post-to-browser-channel
-   (list (json-encode-list (:a wave-client-identifier
-                               :r (incf wave-client-request-num)
-                               :t 1100 :p json-proto)))))
+   (list (json-encode-list (list :a wave-client-identifier
+                                 :r "f"
+                                 :t 1100 :p delta)))))
 
 ;; Functions for the Wave mode to use:
 

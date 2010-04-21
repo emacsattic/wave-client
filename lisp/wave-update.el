@@ -38,10 +38,6 @@
   "From an operation OP, return the relevant message type"
   (cdr (assoc op wave-update-op-to-message-type)))
 
-(defun wave-update-make-delta (wave-id wavelet-id user-id delta-version
-                                       op mutation)
-  `(:1 ,wave-id :2 ,wavelet-id :3 mutation :4 "" :5 [0 0]))
-
 (defmacro defproto (name &rest struct-elems)
   "Replacement for defstruct, allows for proto field number
   mappings"
@@ -63,14 +59,46 @@
                       (when field-val
                         (setq plist
                               (plist-put plist (cadr field-def) field-val)))))
-                  plist)))))
+                  plist))
+              (defun ,(intern (concat (symbol-name name) "-proto"))
+                (&rest fields)
+                (,(intern (concat (symbol-name name) "-to-proto"))
+                 (apply (quote ,(intern (concat "make-" (symbol-name name))))
+                        fields))))))
 
 ;;; Protos definitions see:
 ;;; http://www.waveprotocol.org/draft-protocol-specs/draft-protocol-spec#anchor11
 ;;; Note the numerical values there don't always seem to be right.  We
 ;;; use the correct version.
 
-(defproto wave-op-component
+(defproto wave-submit-delta-request
+  (wave-id :1)
+  (wavelet-id :2)
+  (delta :3))
+
+(defproto wave-delta
+  (version :1)
+  (user-id :3)
+  (op-list :4))
+
+(defproto wave-op
+  (type-id :1)
+  (add-blip :3)
+  (add-participant :4)
+  (remove-participant :5)
+  (delete-blip :9)
+  (blip-submit :10)
+  (set-tombstone :11)
+  (mutate-document :23))
+
+(defproto wave-mutate-document
+  (document-id :1)
+  (operation :2))
+
+(defproto wave-document-operation
+  (component :2))
+
+(defproto wave-component
   (element-start :4)
   (element-end :5)
   (retain-item-count :6))
@@ -79,9 +107,58 @@
   (key :1)
   (value :2))
 
-(defproto element-start
+(defproto wave-element-start
   (type :1)
-  (attribute :2))
+  (attributes :2))
+
+(defun wave-update-mark-blip-read (wave-id blip-id user-header conv-header
+                                           m-read)
+  "Mark a blip read."
+  (unless m-read
+    (error "Marking unread waves read not yet supported"))
+  (let* ((pos (position-if (lambda (elem)
+                             (eq (car elem) 'blip)) m-read))
+         (ops (vector
+               (wave-component-proto
+                :retain-item-count pos)
+               (wave-component-proto
+                :element-start
+                (wave-element-start-proto
+                 :type "blip"
+                 :attributes (vector
+                              (wave-key-value-pair-proto
+                               :key "i" :value blip-id)
+                              (wave-key-value-pair-proto
+                               :key "v"
+                               :value
+                               (wave-display-header-version conv-header)))))
+               (wave-component-proto :element-end t)
+               (wave-component-proto
+                :retain-item-count (- (length m-read) pos)))))
+    (wave-client-send-delta
+     (wave-update-mutation wave-id
+                           (cdr (wave-display-header-wavelet-name user-header))
+                           blip-id (wave-display-header-version user-header)
+                           "m/read" ops))))
+
+(defun wave-update-mutation (wave-id wavelet-id blip-id
+                                     wavelet-version document-id ops)
+  "Produce a mutation to make blip BLIP-ID read.  WAVELET-VERSION is
+the current version of the wavelet."
+  (wave-submit-delta-request-proto
+   :wave-id wave-id
+   :wavelet-id wavelet-id
+   :delta
+   (wave-delta-proto
+    :version (vector wavelet-version 0)
+    :user-id (wave-client-email-address)
+    :op-list (vector (wave-op-proto
+                      :type-id (wave-update-message-type 'mutate-document)
+                      :mutate-document
+                      (wave-mutate-document-proto
+                       :document-id document-id
+                       :operation
+                       (wave-document-operation-proto :component ops)))))))
 
 (provide 'wave-update)
 
