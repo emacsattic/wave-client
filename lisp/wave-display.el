@@ -169,19 +169,12 @@
   (loop
    (setq element (funcall ewoc-fn wave-display-ewoc element))
    (when (null element)
-     (message "No further nodes")
+     (wave-debug "No further nodes")
      (return))
    (unless (wave-display-node-should-be-skipped-p (ewoc-data element))
      (goto-char (ewoc-location element))
+     (wave-display-maybe-mark-unread element)
      (return))))
-
-(defun wave-display-find-header (node)
-  "Find the corresponding header data for this node, or NIL if
-there is no valid header."
-  (let ((cur-node node))
-    (while (and (not (wave-display-header-p (ewoc-data cur-node)))
-                (setq cur-node (ewoc-prev wave-display-ewoc cur-node))))
-    (when cur-node (ewoc-data cur-node))))
 
 (defun wave-display-maybe-mark-unread (blip-node)
   "If a blip is unread, mark it read."
@@ -199,7 +192,6 @@ there is no valid header."
         (unless user-header (error "Could not find user header!"))
         (unless conv-header (error "Could not find conv header!"))
         (wave-update-mark-blip-read
-         wave-display-wave-id
          (wave-display-blip-blip-id blip)
          user-header
          conv-header
@@ -307,7 +299,7 @@ there is no valid header."
                    (w:caption
                     ;; TODO(ahyatt) Format with caption face
                     )
-                   (t (message
+                   (t (wave-debug
                        "Don't know how to close out %s"
                        (car closed-op))))))
               ((and (listp op) (eq '@boundary (car op)))
@@ -341,7 +333,7 @@ there is no valid header."
                                 (string-match "^user/e/" key))
                             ;; TODO: Implement these
                             )
-                           (t (message
+                           (t (wave-debug
                                "Don't know how to handle end-boundary of type %s"
                                key))))))))
               ((listp op)
@@ -494,6 +486,7 @@ there is no valid header."
         (participants nil)
         (all nil)
         (op-stack '()))
+    (wave-debug "m/read raw: %s" content)
     (dolist (op content)
       (cond
        ((eq op 'end)

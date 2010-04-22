@@ -111,32 +111,53 @@
   (type :1)
   (attributes :2))
 
-(defun wave-update-mark-blip-read (wave-id blip-id user-header conv-header
+(defun wave-update-blip-version-proto (blip-id version)
+  "Make a proto storing the blip version start-element.  Must be
+  closed by a close-element."
+  (wave-element-start-proto
+           :type "blip"
+           :attributes (vector
+                        (wave-key-value-pair-proto
+                         :key "i" :value blip-id)
+                        (wave-key-value-pair-proto
+                         :key "v"
+                         :value version))))
+
+(defun wave-update-wavelet-id-proto (wavelet-id)
+  "Make a wavelet-id proto.  Must be closed by a close-element."
+  (wave-element-start-proto :type "wavelet"
+                            :attributes
+                            (vector
+                             (wave-key-value-pair-proto
+                              :key "i" :value
+                              (cdr wavelet-id)))))
+
+(defun wave-update-mark-blip-read (blip-id user-header conv-header
                                            m-read)
   "Mark a blip read."
-  (unless m-read
-    (error "Marking unread waves read not yet supported"))
   (let* ((pos (position-if (lambda (elem)
                              (eq (car elem) 'blip)) m-read))
-         (ops (vector
-               (wave-component-proto
-                :retain-item-count pos)
-               (wave-component-proto
-                :element-start
-                (wave-element-start-proto
-                 :type "blip"
-                 :attributes (vector
-                              (wave-key-value-pair-proto
-                               :key "i" :value blip-id)
-                              (wave-key-value-pair-proto
-                               :key "v"
-                               :value
-                               (wave-display-header-version conv-header)))))
-               (wave-component-proto :element-end t)
-               (wave-component-proto
-                :retain-item-count (- (length m-read) pos)))))
+         (new-read-op
+          (wave-update-blip-version-proto blip-id (wave-display-header-version conv-header)))
+         (ops (if m-read
+                  (vector
+                   (wave-component-proto
+                    :retain-item-count pos)
+                   (wave-component-proto
+                    :element-start
+                    new-read-op)
+                   (wave-component-proto :element-end t)
+                   (wave-component-proto
+                    :retain-item-count (- (length m-read) pos)))
+                ;; adding to m/read
+                (vector (wave-update-wavelet-id-proto
+                         (wave-display-header-wavelet-name
+                          conv-header))
+                        (wave-component-proto :element-end t)
+                        new-read-op
+                        (wave-component-proto :element-end t)))))
     (wave-client-send-delta
-     (wave-update-mutation wave-id
+     (wave-update-mutation (car (wave-display-header-wavelet-name user-header))
                            (cdr (wave-display-header-wavelet-name user-header))
                            blip-id (wave-display-header-version user-header)
                            "m/read" ops))))

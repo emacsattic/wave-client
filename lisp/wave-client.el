@@ -70,11 +70,15 @@ for the default domain."
   "*wave client*"
   "The buffer of the curl process")
 
+(defconst wave-client-task-type
+  '((echo . 0) (view-submit . 1100))
+  "Task type to ids sent with browser channel requests.")
+
 (defvar wave-client-temp-output
   ""
   "Temporary output to the REPL buffer.")
 
-(defvar wave-client-debug
+(defvar wave-debug
   nil
   "Boolean indicating whether debug output should be sent to
 wave-client-debug-buffer")
@@ -91,6 +95,11 @@ wave-client-debug-buffer")
   nil
   "The Wave client gsession, used for creating channels.")
 
+(defvar wave-client-sid
+  nil
+  "The SID of the channel request.  Stays constant throughout the
+  session.")
+
 (defvar wave-client-rid
   nil
   "ID of the channel request.  A random number computed by us,
@@ -103,13 +112,12 @@ incremented for every request.")
 (defvar wave-client-request-num 0
   "The request number, which monotonically increases.")
 
-(defconst wave-client-debug-buffer
+(defvar wave-client-last-array-id 0
+  "Last seen array number")
+
+(defconst wave-debug-buffer
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
-
-(defconst wave-client-current-array-num 0
-  "The array number, monotonically increasing as we read more
-  data from the browser channel.")
 
 (defun wave-client-email-address ()
   "Return the email address of the user."
@@ -117,14 +125,15 @@ incremented for every request.")
       wave-client-user
     (concat wave-client-user "@" (or wave-client-domain "gmail.com"))))
 
-(defun wave-client-debug (str)
-  "Send STR to the `wave-client-debug-buffer', with newline."
-  (when wave-client-debug
+(defun wave-debug (str &rest args)
+  "Send STR to the `wave-debug-buffer', with newline, with format
+args ARGS."
+  (when wave-debug
     (save-excursion
       (set-buffer
-       (get-buffer-create wave-client-debug-buffer))
+       (get-buffer-create wave-debug-buffer))
       (goto-char (point-max))
-      (insert str)
+      (insert (apply 'format (append (list str) args)))
       (insert "\n"))))
 
 (defun wave-client-assert-connected ()
@@ -144,12 +153,20 @@ to the end, if given.  Uses `wave-client-domain'."
             "/wave")
           (or path "/")))
 
+(defun wave-client-reset-browser-channel ()
+  (setq wave-client-gsession nil
+        wave-client-sid nil
+        wave-client-rid nil
+        wave-client-request-num 0
+        wave-client-last-array-id 0))
+
 (defun wave-client-reset ()
   "Clear the stored session and auth token.  Useful for when you
   are switching domains."
   (interactive)
-  (setq wave-client-auth-cookie nil)
-  (setq wave-client-session nil))
+  (setq wave-client-auth-cookie nil
+        wave-client-session nil)
+  (wave-client-reset-browser-channel))
 
 (defun wave-client-get-wave-raw (wave-id)
   "Get the wave given from the WAVE-ID, as a plist data structure
@@ -194,14 +211,14 @@ that is a direct conversion from the JSON."
           (search-forward-regexp "Auth=\\(.*\\)$")
           (url-cookie-store "WAVE" (match-string 1) nil
                             "wave.google.com" "/" t)
-          (match-string 1)))))
+          (match-string 1))
+      (wave-client-kill-current-process-buffer))))
 
 (defun wave-client-kill-current-process-buffer ()
   "Kill the current buffer, if it is a temporary buffer,
 otherwise do nothing."
-  (when (string-match wave-client-process-buf-name
-                      (buffer-name))
-    (kill-buffer)))
+  (when (get-buffer wave-client-process-buf-name)
+    (kill-buffer wave-client-process-buf-name)))
 
 (defun wave-client-fetch (url data &optional method)
   "Execute curl with a given URL and DATA params, return the
@@ -218,6 +235,8 @@ buffer with the result."
 (defun wave-client-curl (url data cookies &optional post)
   "Execute curl with a given URL and cookie DATA, return the
 buffer with the result."
+  (wave-debug "Sending %s request to url %s, with data %s"
+              (if post "POST" "GET") url data)
   (let* ((buf (generate-new-buffer wave-client-process-buf-name))
          (retval
           (apply 'call-process "curl" nil buf nil
@@ -250,6 +269,7 @@ buffer with the result."
   subsitute \" for \' and make sure each key is in quotes.  This
   is not a great thing to do, but we need it for the kind of JSON
   that Wave returns on HTML pages."
+  (wave-debug "Reading json: %s" text)
   (let* ((json-object-type (or object-type 'plist))
          (json-key-type nil)
          (text (or (replace-regexp-in-string "\n" "" text)))
@@ -377,9 +397,9 @@ into the format defined by `wave-inbox'."
   `wave-get-wave'"
   (mapcar 'wave-client-extract-wavelet (plist-get wave-plist :1)))
 
-(defun wave-client-get-json (url-suffix &optional method)
-  "Return the JSON from a Wave servlet with URL-SUFFIX.  METHOD
-should 'get or 'post.  Not specified will default to 'get."
+(defun wave-client-get-json (url-suffix &optional data noerror)
+  "Return the JSON from a Wave servlet with URL-SUFFIX.  If DATA
+is defined, we will do a POST with the data."
   (save-excursion
     (unwind-protect
         (progn
@@ -387,21 +407,23 @@ should 'get or 'post.  Not specified will default to 'get."
            (wave-client-curl
             (wave-client-get-url url-suffix)
             ;; we need something to trigger a curl post
-            (when (eq method 'post) '(("not" . "used")))
+            data
             `(("WAVE" . ,wave-client-auth-cookie))
-            (eq method 'post)))
+            (not (null data))))
           (goto-char (point-min))
-          (re-search-forward "{\\|\\[")
-          (wave-client-json-read
-           (substring (buffer-string)
-                      (- (point) 2))))
+          (if (re-search-forward "{\\|\\[" nil noerror)
+            (wave-client-json-read
+             (substring (buffer-string)
+                        (- (point) 2)))
+            (buffer-string)))
       (wave-client-kill-current-process-buffer))))
 
 (defun wave-client-populate-gsession ()
   "Get the gsessionid that Wave uses to keep track of channels."
   (setq wave-client-gsession
         (plist-get
-         (wave-client-get-json "/wfe/testLogin?gsessionid=unknown" 'post)
+         (wave-client-get-json "/wfe/testLogin?gsessionid=unknown"
+                               '(("not" . "used")))
          :1)))
 
 (defun wave-client-update-to-list (update-list kind)
@@ -415,6 +437,9 @@ of updates with key KIND."
                        (list (cons order (elt data 1))))))
                  update-list)))
     (sort ordered-list (lambda (a b) (< (car a) (car b))))
+    (wave-debug "ordered-list = %s" ordered-list)
+    (let ((last-id (caar (last ordered-list))))
+      (when last-id (setf wave-client-last-array-id last-id)))
     (mapcar 'cdr ordered-list)))
 
 (defun wave-client-get-inc-rid ()
@@ -425,57 +450,80 @@ before it is incremented."
 
 (defun wave-client-get-channel-sid ()
   "Get the SID neceesary to open a Wave channel connection."
-  (setq wave-client-rid (abs (random 100000)))
-  (unless wave-client-gsession
-    (wave-client-populate-gsession))
-  (car (wave-client-update-to-list
-        (wave-client-get-json
-         (concat "/wfe/channel?gsessionid=" wave-client-gsession
-                 "&VER=7&RID=" (wave-client-get-inc-rid)) 'post)
-        "c")))
+  (unless wave-client-sid
+    (setq wave-client-rid (abs (random 100000)))
+    (unless wave-client-gsession
+      (wave-client-populate-gsession))
+    (setq wave-client-sid
+          (car (wave-client-update-to-list
+                (wave-client-get-json
+                 (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                         "&VER=7&RID=" (wave-client-get-inc-rid))
+                 '(("not" . "used")))
+                "c"))))
+  wave-client-sid)
 
 (defun wave-client-post-to-browser-channel (data)
-  "Post DATA to a browser-channel.  DATA is a list of data pieces
-to post."
+  "Post not-yet-jsonified DATA to a browser-channel.  DATA is a
+list of data pieces to post."
+  (wave-debug "Posting to browser channel: %s" data)
   (let* ((sid (wave-client-get-channel-sid))
-         (url (wave-client-get-url
-               (concat "/wfe/channel?gsessionid=" wave-client-gsession
-                       "&VER=8&SID=" sid "&RID=" (wave-client-get-inc-rid))))
+         (url (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                       "&VER=8&SID=" sid "&RID=" (wave-client-get-inc-rid)
+                       "&AID=" (int-to-string wave-client-last-array-id)))
          (i 0))
-    (wave-client-curl url (append
-                           (list (cons "count" (int-to-string (length data)))) 
+    (unwind-protect
+        (wave-client-get-json url
+                          (append
+                           (list (cons "count" (int-to-string (length data))))
+                           (list (cons "ofs"
+                                       (int-to-string wave-client-request-num)))
                            (mapcar (lambda (d)
                                      (let ((retval
                                             (cons
                                              (concat "req" (int-to-string i)
                                                      "_key")
-                                                  d)))
+                                             (json-encode-list d))))
                                        (incf i)
-                                       retval)) data))
-                      `(("WAVE" . ,wave-client-auth-cookie)) t)))
+                                       retval)) data)) t)
+      (wave-client-kill-current-process-buffer))))
 
-(defun wave-client-get-browser-channel ()
-  "Get the response from the latest browser-channel"
-  (let* ((sid (wave-client-get-channel-sid))
-         (url (wave-client-get-url
-               (concat "/wfe/channel?gsessionid=" wave-client-gsession
-                       "&VER=8&SID=" sid "&AID="
-                       (int-to-string wave-client-current-array-num)
-                       "&RID=rpc&CI=0&TYPE=xmlhttp&t=1"))))
-    (wave-client-curl url '()
-                      `(("WAVE" . ,wave-client-auth-cookie)))))
-
-(defun wave-client-send-delta (delta)
-  "Send DELTA to the wave server."
+(defun wave-client-wrap-browser-channel-req (data type)
+  "Return an json object wrapping the data for posting to a
+  browser channel, not yet converted to a string.  TYPE is an
+  symbol of the set mapped by `wave-client-task-type'."
   (unless wave-client-identifier
     ;; TODO(ahyatt): The identifier should be a random string, but for
     ;; now, we just have it be a random number string, which is
     ;; somewhat lame.
     (setq wave-client-identifier (int-to-string (random 100000))))
+  (list :a wave-client-identifier
+        :r (incf wave-client-request-num)
+        :t (cdr (assoc type wave-client-task-type))
+        :p data))
+
+(defun wave-client-get-browser-channel ()
+  "Get the response from the latest browser-channel"
+  (let* ((sid (wave-client-get-channel-sid))
+         (url-suffix (concat "/wfe/channel?gsessionid=" wave-client-gsession
+                             "&VER=8&SID=" sid "&AID="
+                             (int-to-string wave-client-last-array-id)
+                             "&RID=rpc&CI=0&TYPE=xmlhttp&t=1")))
+    (unwind-protect (wave-client-update-to-list
+                     (wave-client-get-json url-suffix) "wfe")
+      (wave-client-kill-current-process-buffer))))
+
+(defun wave-client-browser-channel-echo-test (test-id &optional noread)
+  "Test whether we can post to a browser channel once and get a
+  reply.  TEST-ID is anything unique to echo."
+  (let ((req (wave-client-wrap-browser-channel-req `(:1 ,test-id) 'echo)))
+      (wave-client-post-to-browser-channel (list req))
+      (unless noread (wave-client-get-browser-channel))))
+
+(defun wave-client-send-delta (delta)
+  "Send DELTA to the wave server."
   (wave-client-post-to-browser-channel
-   (list (json-encode-list (list :a wave-client-identifier
-                                 :r "f"
-                                 :t 1100 :p delta)))))
+   (list (wave-client-wrap-browser-channel-req delta 'view-submit))))
 
 ;; Functions for the Wave mode to use:
 
