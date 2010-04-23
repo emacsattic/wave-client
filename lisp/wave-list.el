@@ -55,6 +55,7 @@
     (define-key map "n" 'next-line)
     (define-key map "p" 'previous-line)
     (define-key map "\r" 'wave-list-open)
+    (define-key map "g" 'wave-list-refresh)
     map)
   "Keybindings for wave-list mode.")
 
@@ -88,7 +89,6 @@ If no @ symbol is found, return FULL-USERNAME unmodified."
 
 Every wave takes up one line."
   (setq wave-list-waves wave-list)
-  (setq buffer-read-only nil)
   (erase-buffer)
   (dolist (summary-alist wave-list)
     (let ((num-unread (plist-get summary-alist :unread)))
@@ -126,29 +126,34 @@ Every wave takes up one line."
   (kill-line)
   (goto-char (point-min)))
 
-(defun wave-list-mode ()
-  "Major mode for navigating a list of waves.
+(defun wave-list-refresh ()
+  (interactive)
+  (let ((inhibit-read-only t))
+    (wave-list-render-wave-list (wave-get-inbox))))
+
+(define-derived-mode wave-list-mode nil "Wave List"
+  "Mode for displaying a list of waves.
 
 Each line in the mode represents a Wave that can be opened.
 The wave client must be connected here.
 \\{wave-list-mode-map}"
-  (interactive)
-  (set-buffer (get-buffer-create wave-list-buffer-name))
-  (kill-all-local-variables)
-  (setq major-mode 'wave-list-mode)
-  (setq mode-name "Wave List")
+  :group 'wave-list
   (use-local-map wave-list-mode-map)
-  (wave-list-render-wave-list (wave-inbox))
   (buffer-disable-undo)
   (setq buffer-read-only t
 	show-trailing-whitespace nil
         truncate-lines t
         selective-display t
         selective-display-ellipses t)
-  (hl-line-mode)
-  (run-mode-hooks)
+  (hl-line-mode))
+
+(defun wave-list ()
+  (interactive)
+  (set-buffer (get-buffer-create wave-list-buffer-name))
+  (wave-list-mode)
   (set-window-buffer (get-buffer-window (current-buffer))
-                     wave-list-buffer-name))
+                     wave-list-buffer-name)
+  (wave-list-refresh))
 
 (provide 'wave-list)
 

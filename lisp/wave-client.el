@@ -246,7 +246,7 @@ buffer with the result."
   ;; If the gsession is no longer current, do not accept anything.
   (while (and (equal wave-client-gsession gsession)
               (re-search-forward "^[[:digit:]]+$" nil t))
-    (let* ((len (string-to-int (match-string 0)))
+    (let* ((len (string-to-number (match-string 0)))
            (end (+ (point) len))
            (json (json-read-from-string (buffer-substring (point) end)))
            (last (aref json (- (length json) 1))))
@@ -341,7 +341,7 @@ the `wave-client-session' variable."
 
 (defun wave-client-extract-waves (wave-plist)
   "Extract information from the raw WAVE-PLIST, transforming it
-into the format defined by `wave-inbox'."
+into the format defined by `wave-get-inbox'."
   (mapcar (lambda (wave)
             (list :id (plist-get wave :1)
                   :unread (plist-get wave :7)  ;; int
@@ -559,7 +559,7 @@ list of data pieces to post."
 
 ;; Functions for the Wave mode to use:
 
-(defun wave-inbox ()
+(defun wave-get-inbox ()
   "List all waves in the inbox. For the exact format, see
 http://code.google.com/p/wave-client-for-emacs/wiki/WaveClientDataSpec"
   (wave-client-extract-waves (wave-client-get-waves)))
