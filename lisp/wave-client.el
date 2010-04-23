@@ -115,6 +115,9 @@ incremented for every request.")
 (defvar wave-client-last-array-id 0
   "Last seen array number")
 
+(defvar wave-client-queue '()
+  "A queue of json messages from the GET browser channel")
+
 (defconst wave-debug-buffer
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
@@ -223,6 +226,7 @@ otherwise do nothing."
 (defun wave-client-fetch (url data &optional method)
   "Execute curl with a given URL and DATA params, return the
 buffer with the result."
+  (wave-debug "Fetching data from %s" url)
   (let ((url-request-data (mapconcat (lambda (c)
                                        (concat
                                         (url-hexify-string (car c))
@@ -230,7 +234,38 @@ buffer with the result."
                                         (url-hexify-string (cdr c))))
                                      data "&"))
         (url-request-method (or method "GET")))
-    (url-retrieve-synchronously url)))
+    (url-retrieve url 'wave-client-accept (list wave-client-gsession))))
+
+(defun wave-client-accept (status &optional gsession)
+  "Accept the next set of browser channel items."
+  (cond ((eq (car status) :redirect)
+         (wave-debug "Redirect to: %s" (cadr status)))
+        ((eq (car status) :error)
+         (signal (caadr status) (cdadr status))))
+  (wave-debug "accept, buffer-string: %s" (buffer-string))
+  ;; If the gsession is no longer current, do not accept anything.
+  (while (and (equal wave-client-gsession gsession)
+              (re-search-forward "^[[:digit:]]+$" nil t))
+    (let* ((len (string-to-int (match-string 0)))
+           (end (+ (point) len))
+           (json (json-read-from-string (buffer-substring (point) end)))
+           (last (aref json (- (length json) 1))))
+      (setq wave-client-last-array-id (aref last 0))
+      (setq wave-client-queue
+            (append wave-client-queue
+                    (remove-if-not (lambda (e) (equal (aref (cdr e) 0) "wfe"))
+                                   (mapcar (lambda (elem)
+                                             (cons (aref elem 0)
+                                                   (if (stringp (aref elem 1))
+                                                       (json-read-from-string
+                                                        (aref elem 1))
+                                                     (aref elem 1)))) json))))
+      ;; We need to restart the browser channel if it stops
+      (when (and (vectorp (aref last 1)) (equal (aref (aref last 1) 0) "stop"))
+        (wave-debug "Browser channel stopped, re-opening after a minute.")
+        (wave-client-reset-browser-channel)
+        ;; After a minute, try again
+        (run-at-time "5 sec" nil 'wave-client-get-browser-channel)))))
 
 (defun wave-client-curl (url data cookies &optional post)
   "Execute curl with a given URL and cookie DATA, return the
@@ -508,17 +543,14 @@ list of data pieces to post."
          (url-suffix (concat "/wfe/channel?gsessionid=" wave-client-gsession
                              "&VER=8&SID=" sid "&AID="
                              (int-to-string wave-client-last-array-id)
-                             "&RID=rpc&CI=0&TYPE=xmlhttp&t=1")))
-    (unwind-protect (wave-client-update-to-list
-                     (wave-client-get-json url-suffix) "wfe")
-      (wave-client-kill-current-process-buffer))))
+                             "&RID=rpc&CI=1&TYPE=xmlhttp&t=1")))
+    (wave-client-fetch (wave-client-get-url url-suffix) nil)))
 
-(defun wave-client-browser-channel-echo-test (test-id &optional noread)
+(defun wave-client-browser-channel-echo-test (test-id)
   "Test whether we can post to a browser channel once and get a
   reply.  TEST-ID is anything unique to echo."
   (let ((req (wave-client-wrap-browser-channel-req `(:1 ,test-id) 'echo)))
-      (wave-client-post-to-browser-channel (list req))
-      (unless noread (wave-client-get-browser-channel))))
+      (wave-client-post-to-browser-channel (list req))))
 
 (defun wave-client-send-delta (delta)
   "Send DELTA to the wave server."
