@@ -122,8 +122,9 @@ Every wave takes up one line."
         (add-text-properties bol eol (list 'summary (plist-get summary-alist :digest)))
         (add-text-properties bol eol (list 'wave-id (plist-get summary-alist :id))))))
   (goto-char (point-max))
-  (backward-char)
-  (kill-line)
+  (unless (eql (point) (point-min))
+    (backward-char)
+    (kill-line))
   (goto-char (point-min)))
 
 (defun wave-list-refresh ()
