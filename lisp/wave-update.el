@@ -29,9 +29,9 @@
 (require 'wave-client)
 
 (defconst wave-update-op-to-message-type
-  '((add-blip . 6086091) (add-participant . 5975636)
-    (remove-participant . 5975541) (delete-blip . 6125027)
-    (set-tombstone . 8348011) (blip-submit . 5926533)
+  '((add-participant . 5975636)
+    (remove-participant . 5975541)
+    (blip-submit . 5926533)
     (mutate-document . 9184307)))
 
 (defun wave-update-message-type (op)
@@ -83,13 +83,13 @@
 
 (defproto wave-op
   (type-id :1)
-  (add-blip :3)
   (add-participant :4)
   (remove-participant :5)
-  (delete-blip :9)
   (blip-submit :10)
-  (set-tombstone :11)
   (mutate-document :23))
+
+(defproto wave-add-participant
+  (user-id :1))
 
 (defproto wave-mutate-document
   (document-id :1)
@@ -180,6 +180,30 @@ the current version of the wavelet."
                        :document-id document-id
                        :operation
                        (wave-document-operation-proto :component ops)))))))
+
+(defun wave-update-submit (wavelet-name wavelet-version ops)
+  (check-type ops sequence)
+  (check-type wavelet-version (integer 0 *))
+  (wave-client-send-delta
+   (wave-submit-delta-request-proto
+    :wave-id (car wavelet-name)
+    :wavelet-id (cdr wavelet-name)
+    :delta
+    (wave-delta-proto
+     ;; TODO(ohler): add support for versions above 2**31
+     :version (vector wavelet-version 0)
+     :user-id (wave-client-email-address)
+     :op-list (coerce ops 'vector)))))
+
+(defun wave-update-add-participant (wavelet-name wavelet-version
+                                                 participant-address)
+  (wave-update-submit wavelet-name wavelet-version
+                      (list
+                       (wave-op-proto
+                        :type-id (wave-update-message-type 'add-participant)
+                        :add-participant
+                        (wave-add-participant-proto
+                         :user-id participant-address)))))
 
 (provide 'wave-update)
 

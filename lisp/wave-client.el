@@ -122,11 +122,14 @@ incremented for every request.")
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
 
+(defun wave-client-domain ()
+  (or wave-client-domain "googlewave.com"))
+
 (defun wave-client-email-address ()
   "Return the email address of the user."
   (if (string-match "@" wave-client-user)
       wave-client-user
-    (concat wave-client-user "@" (or wave-client-domain "gmail.com"))))
+    (concat wave-client-user "@" (wave-client-domain))))
 
 (defun wave-debug (str &rest args)
   "Send STR to the `wave-debug-buffer', with newline, with format
@@ -246,7 +249,7 @@ buffer with the result."
   ;; If the gsession is no longer current, do not accept anything.
   (while (and (equal wave-client-gsession gsession)
               (re-search-forward "^[[:digit:]]+$" nil t))
-    (let* ((len (string-to-int (match-string 0)))
+    (let* ((len (string-to-number (match-string 0)))
            (end (+ (point) len))
            (json (json-read-from-string (buffer-substring (point) end)))
            (last (aref json (- (length json) 1))))
@@ -341,7 +344,7 @@ the `wave-client-session' variable."
 
 (defun wave-client-extract-waves (wave-plist)
   "Extract information from the raw WAVE-PLIST, transforming it
-into the format defined by `wave-inbox'."
+into the format defined by `wave-get-inbox'."
   (mapcar (lambda (wave)
             (list :id (plist-get wave :1)
                   :unread (plist-get wave :7)  ;; int
@@ -559,7 +562,7 @@ list of data pieces to post."
 
 ;; Functions for the Wave mode to use:
 
-(defun wave-inbox ()
+(defun wave-get-inbox ()
   "List all waves in the inbox. For the exact format, see
 http://code.google.com/p/wave-client-for-emacs/wiki/WaveClientDataSpec"
   (wave-client-extract-waves (wave-client-get-waves)))
