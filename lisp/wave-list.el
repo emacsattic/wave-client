@@ -128,6 +128,7 @@ Every wave takes up one line."
 
 (defun wave-list-refresh ()
   (interactive)
+  (assert (eql major-mode 'wave-list-mode))
   (let ((inhibit-read-only t))
     (wave-list-render-wave-list (wave-get-inbox))))
 

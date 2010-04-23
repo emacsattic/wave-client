@@ -78,6 +78,7 @@
     (define-key map "R" 'wave-display-toggle-debugging-info)
     (define-key map "g" 'wave-display-refresh)
     (define-key map "q" 'wave-kill-wave-display)
+    (define-key map "a" 'wave-display-add-participant)
     map)
   "Keybindings for wave mode.")
 
@@ -180,15 +181,11 @@
   "If a blip is unread, mark it read."
   (let ((blip (ewoc-data blip-node)))
     (when (wave-display-blip-unreadp blip)
-      (let* ((wavelet-name (concat
-                            (or wave-client-domain "googlewave.com")
-                            "!user+"
-                            (wave-client-email-address)))
-             (conv-name (concat (or wave-client-domain "googlewave.com")
-                                "!conv+root"))
-             (user-header
-              (gethash wavelet-name wave-display-wavelets))
-             (conv-header (gethash conv-name wave-display-wavelets)))
+      (let* ((user-wavelet-id (concat (wave-client-domain)
+                                      "!user+" (wave-client-email-address)))
+             (conv-wavelet-id (concat (wave-client-domain) "!conv+root"))
+             (user-header (gethash user-wavelet-id wave-display-wavelets))
+             (conv-header (gethash conv-wavelet-id wave-display-wavelets)))
         (unless user-header (error "Could not find user header!"))
         (unless conv-header (error "Could not find conv header!"))
         (wave-update-mark-blip-read
@@ -198,6 +195,25 @@
          (wave-wavelet-read-state-raw
           (cdr (assoc (cdr (wave-display-header-wavelet-name conv-header))
                       wave-display-wave-read-state))))))))
+
+(defun wave-display-wavelet-name-at-point ()
+  (let ((node (ewoc-data (ewoc-locate wave-display-ewoc))))
+    (etypecase node
+      (wave-display-blip (wave-display-blip-wavelet-name node))
+      (wave-display-header (wave-display-header-wavelet-name node)))))
+
+(defun wave-display-add-participant (wavelet-name participant-id)
+  (interactive
+   (let* ((wavelet-name (wave-display-wavelet-name-at-point))
+          (address (read-string
+                    (format "Add participant to wavelet %s: " (cdr wavelet-name)))))
+     (list wavelet-name address)))
+  (wave-update-add-participant wavelet-name
+                               (wave-display-header-version
+                                (gethash (cdr wavelet-name) wave-display-wavelets))
+                               participant-id)
+  ;; perhaps need some delay before doing this?
+  (wave-display-refresh))
 
 (defun wave-display-next-blip ()
   "Moves to the next blip from the cursor."

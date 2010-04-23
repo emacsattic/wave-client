@@ -122,11 +122,14 @@ incremented for every request.")
   "*Wave Client Debug Buffer*"
   "Name of the buffer wear debug output is sent to")
 
+(defun wave-client-domain ()
+  (or wave-client-domain "googlewave.com"))
+
 (defun wave-client-email-address ()
   "Return the email address of the user."
   (if (string-match "@" wave-client-user)
       wave-client-user
-    (concat wave-client-user "@" (or wave-client-domain "gmail.com"))))
+    (concat wave-client-user "@" (wave-client-domain))))
 
 (defun wave-debug (str &rest args)
   "Send STR to the `wave-debug-buffer', with newline, with format
