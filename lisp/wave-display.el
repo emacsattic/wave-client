@@ -67,6 +67,15 @@
   "Face used for unread markers."
   :group 'wave-display)
 
+(defface wave-insert-marker
+  '((((class color)) (:background "Red"))
+    (t (:bold t)))
+  "Face used for the insert marker."
+  :group 'wave-display)
+
+(defconst wave-blip-buffer-name
+  "*Wave Message*")
+
 (defvar wave-display-buffer-format "*Wave %s*"
   "The format argument, which must have one %s, for a Wave's
   buffer name.")
@@ -76,6 +85,7 @@
     (define-key map "n" 'wave-display-next-blip)
     (define-key map "p" 'wave-display-previous-blip)
     (define-key map "R" 'wave-display-toggle-debugging-info)
+    (define-key map "i" 'wave-display-insert-blip)
     (define-key map "g" 'wave-display-refresh)
     (define-key map "q" 'wave-kill-wave-display)
     (define-key map "a" 'wave-display-add-participant)
@@ -96,13 +106,23 @@
 
 (defvar wave-display-wave-read-state
   nil
-  "An alist that maps wavelet id strings to wavelet wavelet read states.")
+  "An alist that maps wavelet id strings to wavelet read states.")
 (make-variable-buffer-local 'wave-display-wave-read-state)
 
 (defvar wave-display-wavelets
   (make-hash-table :test 'equal)
   "Hash table of wavelet ids to wavelets.")
 (make-variable-buffer-local 'wave-display-wavelets)
+
+(defvar wave-display-saved-window-configuration
+  nil
+  "The window configuration before an insert or edit takes
+  place.")
+(make-variable-buffer-local 'wave-display-saved-window-configuration)
+
+(defvar wave-display-conversations (make-hash-table :test 'equal)
+  "Hash table of a wavelet id (parent) to the conversation data.")
+(make-variable-buffer-local 'wave-display-conversations)
 
 (defstruct (wave-wavelet-read-state (:constructor wave-make-wavelet-read-state))
   (blips (make-hash-table))
@@ -150,16 +170,15 @@
                (not (wave-display-node-should-be-skipped-p (ewoc-data element)))
                ;; If in header, don't highlight first element.
                (>= (point) (ewoc-location element)))
-      (overlay-put (make-overlay
-                    (ewoc-location element)
-                    (let ((next (ewoc-next wave-display-ewoc element)))
-                      (if next
-                          (ewoc-location next)
-                        ;; Apparently, ewoc doesn't know where the
-                        ;; last element ends.  point-max is OK as long
-                        ;; as we have no footer.
-                        (point-max))))
-                   'face 'hl-line))))
+      (let ((end (let ((next (ewoc-next wave-display-ewoc element)))
+                       (if next
+                           (ewoc-location next)
+                         ;; Apparently, ewoc doesn't know where the
+                         ;; last element ends.  point-max is OK as long
+                         ;; as we have no footer.
+                         (point-max)))))
+        (overlay-put (make-overlay (ewoc-location element) end)
+                     'face 'hl-line)))))
 
 (defun wave-display-node-should-be-skipped-p (node)
   (or (typep node 'wave-display-header)
@@ -210,7 +229,8 @@
      (list wavelet-name address)))
   (wave-update-add-participant wavelet-name
                                (wave-display-header-version
-                                (gethash (cdr wavelet-name) wave-display-wavelets))
+                                (gethash (cdr wavelet-name)
+                                         wave-display-wavelets))
                                participant-id)
   ;; perhaps need some delay before doing this?
   (wave-display-refresh))
@@ -361,7 +381,9 @@
   (let* ((raw-blip (wave-display-raw-doc-raw-blip node))
          (level (wave-display-node-indentation-level node)))
     (indent-to (* 2 level))
-    (pprint raw-blip (current-buffer))
+    (if (fboundp 'pprint)
+        (pprint raw-blip (current-buffer))
+      (insert (format "%S" raw-blip)))
     (insert "\n\n")))
 
 (defun wave-display-node-printer (node)
@@ -425,13 +447,16 @@
                   (conversation-found
                    (warn
                     "Found two conversations in manifest, displaying only one")
-                   (return-from 'wave-display-add-conversation))
+                   (return-from wave-display-add-conversation))
                   (op-stack
-                   (error "Convegrsation element not at top-level"))
+                   (error "Conversation element not at top-level"))
                   (t
                    (setq conversation-found t)
                    (push `(0 nil nil) thread-stack)
-                   (push 'conversation op-stack))))
+                   (push 'conversation op-stack)
+                   (puthash (car wavelet-name)
+                            content
+                            wave-display-conversations))))
                 (@boundary
                  (warn "Found annotations in manifest, ignoring"))
                 (thread
@@ -453,16 +478,16 @@
                          (destructuring-bind (level thread-id inlinep)
                              (car thread-stack)
                            (ewoc-enter-last
-                            ewoc
-                            ;; TODO: implement inline
-                            (wave-display-make-blip
-                             :wavelet-name wavelet-name
-                             :raw-blip raw-blip
-                             :blip-id blip-id
-                             :indentation-level level
-                             :collapsedp nil
-                             :unreadp (wave-display-compute-blip-unread-p
-                                       wavelet-name raw-blip)))))))
+                             ewoc
+                             ;; TODO: implement inline
+                             (wave-display-make-blip
+                              :wavelet-name wavelet-name
+                              :raw-blip raw-blip
+                              :blip-id blip-id
+                              :indentation-level level
+                              :collapsedp nil
+                              :unreadp (wave-display-compute-blip-unread-p
+                                        wavelet-name raw-blip)))))))
                    (push 'blip op-stack)))
                 (peer
                  ;; ignore
@@ -502,7 +527,6 @@
         (participants nil)
         (all nil)
         (op-stack '()))
-    (wave-debug "m/read raw: %s" content)
     (dolist (op content)
       (cond
        ((eq op 'end)
@@ -588,6 +612,24 @@ Returns the new buffer."
     (wave-display-refresh)
     (current-buffer)))
 
+(defun wave-display-insert-blip ()
+  "Insert a blip in the current wavelet."
+  (interactive)
+  (setq wave-display-saved-window-configuration
+        (cons (current-window-configuration) (point-marker)))
+  (delete-other-windows)
+  (let ((compose-buf (get-buffer-create wave-blip-buffer-name))
+        (current-buf (current-buffer))
+        (blip (ewoc-data (ewoc-locate wave-display-ewoc))))
+    (split-window-vertically -10)
+    (switch-to-buffer compose-buf)
+    (setq wave-edit-parent-buf current-buf)
+    (setq wave-edit-previous-blip
+          (wave-display-blip-blip-id blip))
+    (setq wave-edit-wavelet-id
+          (car (wave-display-blip-wavelet-name blip)))
+    (wave-edit-mode)))
+
 (defun wave-display-refresh ()
   (interactive)
   (assert (eql major-mode 'wave-display-mode))
@@ -637,7 +679,8 @@ Returns the new buffer."
         ;;selective-display t
         ;;selective-display-ellipses t
         )
-  (add-hook 'post-command-hook 'wave-display-highlight-blip t t))
+  (add-hook 'post-command-hook 'wave-display-highlight-blip t t)
+  (setq left-margin-width 1))
 
 (provide 'wave-display)
 

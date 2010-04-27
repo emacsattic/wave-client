@@ -71,7 +71,7 @@ for the default domain."
   "The buffer of the curl process")
 
 (defconst wave-client-task-type
-  '((echo . 0) (view-submit . 1100))
+  '((echo . 0) (view-submit . 1100) (presence-open . 2012))
   "Task type to ids sent with browser channel requests.")
 
 (defvar wave-client-temp-output
