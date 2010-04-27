@@ -41,13 +41,28 @@
 (defvar wave-client-ws-process nil
   "The process with the webserver connection.")
 
-(defvar wave-client-queue nil
-  "A queue of JSON strings to be processed.")
+(defvar wave-client-ws-channel-num 0
+  "Incrementing counter for channel numbers.")
 
-(defvar wave-client-sequence-num 0
-  "The sequence number to be used.")
+(defvar wave-client-ws-url "http://127.0.0.1:9898"
+  "The URL for the websocket connection.")
 
-(defun wave-client-ws-open (url)
+(defvar wave-client-ws-user nil
+  "The user wave address for the websocket connection.")
+
+(defvar wave-client-ws-channel-callbacks nil
+  "Hash table of channel numbers to callbacks.")
+
+(defvar wave-client-ws-current-raw-inbox nil
+  "Hash table mapping wavelet names on FedOne's index wave to wavelets.")
+
+(defun wave-client-ws-reset ()
+  (interactive)
+  (setq wave-client-ws-process nil
+        wave-client-ws-channel-callbacks nil
+        wave-client-ws-current-raw-inbox nil))
+
+(defun wave-client-ws-connect (url)
   "Open a websocket connection to URL."
   (let ((url-request-method "GET")
         (url-request-extra-headers `(("Upgrade" . "WebSocket")
@@ -58,14 +73,15 @@
     ;; wave-client-ws-accept doesn't actually get called...
     (save-excursion
       (set-buffer (url-retrieve url 'wave-client-ws-closed))
+      ;; TODO(ohler): fix properly
+      (sit-for 1)
       (wave-client-ws-accept))))
 
 (defun wave-client-ws-closed (status)
   "Called when the connection is closed with STATUS."
   (if (eq (car status) :error)
       (signal (caadr status) (cdadr status)))
-  (setq wave-client-ws-process nil)
-  (setq wave-client-sequence-num 0)
+  (wave-client-ws-reset)
   (wave-debug "Connection closed"))
 
 (defun wave-client-ws-accept ()
@@ -73,28 +89,30 @@
   (unless wave-client-ws-process
     (setq wave-client-ws-process (get-buffer-process (current-buffer)))
     (unless wave-client-ws-process (error "No websocket process found!"))
-    (set-process-filter wave-client-ws-process 'wave-client-filter)))
+    (setq wave-client-ws-channel-callbacks (make-hash-table)
+          wave-client-ws-current-raw-inbox (make-hash-table)) 
+    (set-process-filter wave-client-ws-process 'wave-client-ws-filter)))
 
-(defun wave-client-filter (process output)
+(defun wave-client-ws-filter (process output)
   "Filter OUTPUT from our websocket PROCESS.  As websocket
-responses come back, parse them and queue them up for later
-retrieval."
-  ;; We don't do anything unless we have a valid websocket packet
-  (when (and (equal (substring output 0 1) (unibyte-string ?\0))
-               (equal (substring output
-                                 (- (length output) 1))
-                      (unibyte-string ?\377)))
-    (let ((json-object-type 'plist)
-          (json-key-type nil))
-      (setq wave-client-queue
-          (append wave-client-queue
-                  (list
-                   (let ((response (json-read-from-string
-                                    (substring output 1
-                                               (- (length output) 1)))))
-                     (cons (plist-get response :messageType)
-                           (json-read-from-string
-                            (plist-get response :messageJson))))))))))
+responses come back, parse them and call the appropriate callbacks."
+  ;; TODO(ohler): redo this properly
+  (let ((json-object-type 'plist)
+        (json-key-type nil))
+    (let ((packets (split-string output "[\0\377]" t)))
+      (dolist (packet packets)
+        (let* ((response (json-read-from-string packet))
+               (channel-number (plist-get response :sequenceNumber))
+               (message-type (plist-get response :messageType))
+               (message (json-read-from-string (plist-get response
+                                                          :messageJson))))
+          (let ((callback (gethash channel-number
+                                   wave-client-ws-channel-callbacks)))
+            (if callback
+                (funcall callback message-type message)
+              (message
+               "No callback for channel number %s, discarding message %s %S"
+               channel-number message-type message))))))))
 
 (defun wave-client-ws-send-raw (text)
   "Send the raw TEXT as a websocket packet."
@@ -104,20 +122,141 @@ retrieval."
                        (concat (unibyte-string ?\0) text
                                (unibyte-string ?\377))))
 
-(defun wave-client-send (obj type)
-  "Send OBJ of operation type TYPE to the websocket.
-This is wrapped in the standard wrapper, to the websocket.  TYPE
-is 'open or 'submit."
+(defun wave-client-ws-send (type obj channel-number)
   (wave-client-ws-send-raw
    (json-encode
     `(:version 0
-               :sequenceNumber ,(incf wave-client-sequence-num)
-               :messageType ,(cond ((eq type 'open)
-                                    "waveserver.ProtocolOpenRequest")
-                                   ((eq type 'submit)
-                                    "waveserver.ProtocolSubmitRequest")
-                                   (t (error "Unknown type of operation")))
+               :sequenceNumber ,channel-number
+               :messageType ,type
                :messageJson ,(json-encode obj)))))
+
+(defun wave-client-ws-open (obj callback)
+  "Sends the req OBJ to the server and opens a channel for responses.
+
+CALLBACK should be a two-argument function accepting a response
+type and response.  It will be called once for every response
+that the server sends on the channel.
+
+Returns the channel number, which can be passed into
+`wave-client-ws-close' to close the channel."
+  (let ((channel-number (incf wave-client-ws-channel-num)))
+    (puthash channel-number callback wave-client-ws-channel-callbacks)
+    (wave-client-ws-send "waveserver.ProtocolOpenRequest" obj channel-number)
+    channel-number))
+
+(defun wave-client-ws-close (token)
+  (let ((channel-number token))
+    (remhash channel-number wave-client-ws-channel-callbacks)))
+
+(defun wave-client-ws-submit (obj)
+  "Submits OBJ to the server."
+  (let ((channel-number (incf wave-client-ws-channel-num)))
+    (error "nyi")
+    (wave-client-ws-send "waveserver.ProtocolSubmitRequest" obj channel-number)
+    ))
+
+;; TODO(ohler): this does not work reliably
+(defun wave-client-ws-ensure-connected ()
+  (unless (and wave-client-ws-process
+               (ecase (process-status wave-client-ws-process)
+                 ((run open listen) t)
+                 ((stop exit signal closed connect failed nil) nil)))
+    (setq wave-client-ws-process nil)
+    (wave-client-ws-connect wave-client-ws-url)
+    ;; open inbox
+    (assert wave-client-ws-user nil "wave-client-ws-user must be set")
+    (let ((inbox-channel-number
+           (wave-client-ws-open
+            `(:participant_id ,wave-client-ws-user
+                              :wave_id "indexwave!indexwave"
+                              :wavelet_id_prefix "")
+            'wave-client-ws-inbox-callback)))
+      (message "inbox channel number %s" inbox-channel-number))))
+
+(defun wave-client-ws-parse-wavelet-name (url)
+  (let ((start (string-match "\\`wave://[^/]+/\\([^/]+\\)/\\(.+\\)\\'" url)))
+    (assert (zerop start))
+    (cons (match-string 1 url) (match-string 2 url))))
+
+(defun wave-client-ws-parse-op (raw-op)
+  (destructuring-bind (type arg) raw-op
+    (ecase type
+      (:mutate_document
+       (destructuring-bind (&key document_id document_operation) arg
+         (destructuring-bind (&key component) document_operation
+           (wave-make-doc-op :doc-id (intern document_id)
+                             :components component))))
+      (:add_participant
+       (wave-make-add-participant :address arg))
+      (:remove_participant
+       (wave-make-remove-participant :address arg))
+      (:no_op
+       (assert (eql arg t) t)
+       (wave-make-no-op)))))
+
+(defun wave-client-ws-parse-delta (wavelet-name raw-delta)
+  (destructuring-bind (&key operation author hashed_version) raw-delta
+    (destructuring-bind (&key history_hash version) hashed_version
+      (wave-make-delta :wavelet-name wavelet-name
+                       :author author
+                       :pre-version (cons version 0)
+                       :post-version (cons (+ version (length operation)) 0)
+                       :timestamp 0
+                       :ops (map 'vector 'wave-client-ws-parse-op
+                                 operation)))))
+
+(defun wave-client-ws-inbox-callback (type response)
+  (assert (equal type "waveserver.ProtocolWaveletUpdate"))
+  (let* ((wavelet-name (wave-client-ws-parse-wavelet-name
+                        (plist-get response :wavelet_name)))
+         (deltas (map 'list (lambda (raw-delta)
+                              (wave-client-ws-parse-delta wavelet-name
+                                                          raw-delta))
+                      (plist-get response :applied_delta))))
+    (assert deltas)
+    (let ((wavelet (gethash wavelet-name wave-client-ws-current-raw-inbox)))
+      (when (zerop (car (wave-delta-pre-version (first deltas))))
+        ;; Apparently the server rewrote the history.
+        (setq wavelet nil))
+      (when (null wavelet)
+        (setq wavelet (wave-make-wavelet
+                       :wavelet-name wavelet-name
+                       :creator (wave-delta-author (first deltas))))
+        (puthash wavelet-name wavelet wave-client-ws-current-raw-inbox))
+      (dolist (delta deltas)
+        (wave-apply-delta wavelet delta)))))
+
+(defun wave-client-ws-translate-inbox (raw-data)
+  (let ((accu (list)))
+    (maphash (lambda (key value)
+               (push
+                `(:id ,(cdr (wave-wavelet-wavelet-name value))
+                      :digest
+                      ;; TODO(ohler): do something smart
+                      ,(let ((doc (gethash 'digest (wave-wavelet-docs value))))
+                         (if (null doc)
+                             ""
+                           (format "%S" (wave-doc-content doc))))
+                      :unread 0         ; we don't know
+                      :creator "author" ; we don't know
+                      )
+                     accu))
+             raw-data)
+    (sort* accu #'string< :key (lambda (plist) (plist-get plist :id)))))
+
+;;; Functions for the Wave mode to use:
+
+(defun wave-ws-send-delta (delta)
+  (error "nyi"))
+
+(defun wave-ws-get-inbox ()
+  (wave-client-ws-ensure-connected)
+  ;; Wait an arbitrary amount of time for some data to arrive.
+  (sit-for 1)
+  (wave-client-ws-translate-inbox wave-client-ws-current-raw-inbox))
+
+(defun wave-ws-get-wave (wave-id)
+  (error "nyi"))
 
 (provide 'wave-client-websocket)
 

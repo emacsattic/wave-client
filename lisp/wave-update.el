@@ -45,26 +45,26 @@
                           (cdr struct-elems)
                         struct-elems)))
     `(progn (defstruct ,name
-                ,@(mapcar (lambda (property) (list (car property) nil :read-only t))
-                          struct-elems))
-              (defun ,(intern (concat (symbol-name name) "-to-proto")) (item)
-                (let ((plist '()))
-                  (dolist (field-def (quote ,struct-elems))
-                    (let ((field-val
-                           (funcall
-                            (intern
-                              (concat (symbol-name (quote ,name))
-                                      "-"
-                                      (symbol-name (car field-def)))) item)))
-                      (when field-val
-                        (setq plist
-                              (plist-put plist (cadr field-def) field-val)))))
-                  plist))
-              (defun ,(intern (concat (symbol-name name) "-proto"))
-                (&rest fields)
-                (,(intern (concat (symbol-name name) "-to-proto"))
-                 (apply (quote ,(intern (concat "make-" (symbol-name name))))
-                        fields))))))
+              ,@(mapcar (lambda (property) (list (car property) nil :read-only t))
+                        struct-elems))
+            (defun ,(intern (concat (symbol-name name) "-to-proto")) (item)
+              (let ((plist '()))
+                (dolist (field-def (quote ,struct-elems))
+                  (let ((field-val
+                         (funcall
+                          (intern
+                           (concat (symbol-name (quote ,name))
+                                   "-"
+                                   (symbol-name (car field-def)))) item)))
+                    (when field-val
+                      (setq plist
+                            (plist-put plist (cadr field-def) field-val)))))
+                plist))
+            (defun ,(intern (concat (symbol-name name) "-proto"))
+              (&rest fields)
+              (,(intern (concat (symbol-name name) "-to-proto"))
+               (apply (quote ,(intern (concat "make-" (symbol-name name))))
+                      fields))))))
 
 ;;; Protos definitions see:
 ;;; http://www.waveprotocol.org/draft-protocol-specs/draft-protocol-spec#anchor11
