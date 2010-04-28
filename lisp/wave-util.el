@@ -48,6 +48,31 @@ If we do, debug output is be sent to wave-client-debug-buffer")
       (insert (apply 'format (append (list str) args)))
       (insert "\n"))))
 
+(defun wave-random-b64-string (digits)
+  "Return a random base 64 string of DIGITS length.
+Wave doesn't use +, though, so we substitute - instead."
+  (let ((s '()))
+    (dotimes (v digits)
+      (setq s (cons (random 64) s)))
+    (replace-regexp-in-string
+     "+" "-" (substring (base64-encode-string (apply 'string s)) 0 digits))))
+
+(defun wave-expand-raw (raw)
+  "Canonicalize the operation data RAW.
+The wave data has a few rules that need following: annotations
+are not counted as operations, and each character of a string is
+counted separately.  This should be idempotent."
+  (let ((expanded '()))
+    (dolist (e raw)
+      (cond ((stringp e)
+             (dolist (c (string-to-sequence e 'list))
+               (setq expanded (cons (char-to-string c) expanded))))
+            (t
+             (unless (and (listp e)
+                          (eq (car e) '@boundary))
+               (setq expanded (cons e expanded))))))
+    (nreverse expanded)))
+
 (provide 'wave-util)
 
 ;;; wave-util.el ends here
