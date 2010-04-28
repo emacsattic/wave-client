@@ -47,20 +47,21 @@
 (defvar wave-client-ws-url "http://127.0.0.1:9898"
   "The URL for the websocket connection.")
 
-(defvar wave-client-ws-user nil
-  "The user wave address for the websocket connection.")
-
 (defvar wave-client-ws-channel-callbacks nil
   "Hash table of channel numbers to callbacks.")
 
-(defvar wave-client-ws-current-raw-inbox nil
-  "Hash table mapping wavelet names on FedOne's index wave to wavelets.")
+(defvar wave-client-ws-wave-channels nil
+  "Hash table of wave ids to channel numbers.")
+
+(defvar wave-client-ws-wavelet-states nil
+  "Nested hash table of wave id -> wavelet id -> wave-wavelet object.")
 
 (defun wave-client-ws-reset ()
   (interactive)
   (setq wave-client-ws-process nil
+        wave-client-ws-wave-channels nil
         wave-client-ws-channel-callbacks nil
-        wave-client-ws-current-raw-inbox nil))
+        wave-client-ws-wavelet-states nil))
 
 (defun wave-client-ws-connect (url)
   "Open a websocket connection to URL."
@@ -74,7 +75,7 @@
     (save-excursion
       (set-buffer (url-retrieve url 'wave-client-ws-closed))
       ;; TODO(ohler): fix properly
-      (sit-for 1)
+      (accept-process-output nil 1)
       (wave-client-ws-accept))))
 
 (defun wave-client-ws-closed (status)
@@ -89,8 +90,10 @@
   (unless wave-client-ws-process
     (setq wave-client-ws-process (get-buffer-process (current-buffer)))
     (unless wave-client-ws-process (error "No websocket process found!"))
-    (setq wave-client-ws-channel-callbacks (make-hash-table)
-          wave-client-ws-current-raw-inbox (make-hash-table)) 
+    (setq wave-client-ws-wave-channels (make-hash-table :test 'equal)
+          wave-client-ws-channel-callbacks (make-hash-table)
+          wave-client-ws-wavelet-states (make-hash-table :test 'equal)
+          ) 
     (set-process-filter wave-client-ws-process 'wave-client-ws-filter)))
 
 (defun wave-client-ws-filter (process output)
@@ -137,16 +140,11 @@ CALLBACK should be a two-argument function accepting a response
 type and response.  It will be called once for every response
 that the server sends on the channel.
 
-Returns the channel number, which can be passed into
-`wave-client-ws-close' to close the channel."
+Returns the channel number."
   (let ((channel-number (incf wave-client-ws-channel-num)))
     (puthash channel-number callback wave-client-ws-channel-callbacks)
     (wave-client-ws-send "waveserver.ProtocolOpenRequest" obj channel-number)
     channel-number))
-
-(defun wave-client-ws-close (token)
-  (let ((channel-number token))
-    (remhash channel-number wave-client-ws-channel-callbacks)))
 
 (defun wave-client-ws-submit (obj)
   "Submits OBJ to the server."
@@ -154,6 +152,74 @@ Returns the channel number, which can be passed into
     (error "nyi")
     (wave-client-ws-send "waveserver.ProtocolSubmitRequest" obj channel-number)
     ))
+
+;; Two possible formats:
+;; wave://waveletdomain/wavelocalid/waveletlocalid
+;; wave://waveletdomain/wavedomain!wavelocalid/waveletlocalid
+(defun wave-client-ws-parse-wavelet-name (url)
+  (assert (string-match "\\`wave://\\(.*\\)\\'" url))
+  (let* ((x (match-string 1 url))
+         (parts (split-string x "/")))
+    (assert (eql (length parts) 3))
+    (let (wavedomain
+          wavelocalid
+          waveletdomain
+          waveletlocalid)
+      (if (not (position ?! (second parts)))
+          (setq wavedomain (first parts)
+                wavelocalid (second parts)
+                waveletdomain (first parts)
+                waveletlocalid (third parts))
+        (let ((split (split-string (second parts) "!")))
+          (assert (eql (length split) 2))
+          (setq wavedomain (first split)
+                wavelocalid (second split)
+                waveletdomain (first parts)
+                waveletlocalid (third parts))))
+      (let ((wavelet-name (cons (concat wavedomain "!" wavelocalid)
+                                (concat waveletdomain "!" waveletlocalid))))
+        wavelet-name))))
+
+(defun wave-client-ws-parse-delta (raw-delta)
+  (destructuring-bind (&key operation author hashed_version) raw-delta
+    (destructuring-bind (&key history_hash version) hashed_version
+      (wave-make-delta :author author
+                       :pre-version (cons version 0)
+                       :post-version (cons (+ version (length operation)) 0)
+                       :timestamp 0
+                       :ops (map 'vector 'wave-client-ws-parse-op
+                                 operation)))))
+
+(defun wave-client-ws-wavelet-callback (type response)
+  (ecase (intern-soft type)
+    (waveserver.ProtocolWaveletUpdate
+     (let* ((wavelet-name (wave-client-ws-parse-wavelet-name
+                           (plist-get response :wavelet_name)))
+            (wave-id (car wavelet-name))
+            (wavelet-id (cdr wavelet-name))
+            (deltas (map 'list #'wave-client-ws-parse-delta
+                         (plist-get response :applied_delta))))
+       (assert deltas)
+       (let ((wave (gethash wave-id wave-client-ws-wavelet-states)))
+         (when (null wave)
+           (setq wave (make-hash-table :test 'equal))
+           (puthash wave-id wave wave-client-ws-wavelet-states))
+         (let ((wavelet (gethash wavelet-id wave)))
+           (when (zerop (car (wave-delta-pre-version (first deltas))))
+             ;; The first delta, or the server rewrote the history.
+             (setq wavelet nil))
+           (when (null wavelet)
+             (setq wavelet (wave-make-wavelet
+                            :wavelet-name wavelet-name
+                            :creator (wave-delta-author (first deltas))
+                            :creation-time (wave-delta-timestamp (first deltas))))
+             (puthash wavelet-id wavelet wave))
+           (dolist (delta deltas)
+             (wave-apply-delta wavelet delta))))))
+    ((nil)
+     (error "Unknown type: %S; response=%S" type response))))
+
+(defconst wave-client-ws-indexwave-wave-id "indexwave!indexwave")
 
 ;; TODO(ohler): this does not work reliably
 (defun wave-client-ws-ensure-connected ()
@@ -164,19 +230,25 @@ Returns the channel number, which can be passed into
     (setq wave-client-ws-process nil)
     (wave-client-ws-connect wave-client-ws-url)
     ;; open inbox
-    (assert wave-client-ws-user nil "wave-client-ws-user must be set")
-    (let ((inbox-channel-number
-           (wave-client-ws-open
-            `(:participant_id ,wave-client-ws-user
-                              :wave_id "indexwave!indexwave"
-                              :wavelet_id_prefix "")
-            'wave-client-ws-inbox-callback)))
+    (assert wave-client-user nil "wave-client-user must be set")
+    (let ((inbox-channel-number (wave-client-ws-ensure-wave-channel-open
+                                 wave-client-ws-indexwave-wave-id)))
       (message "inbox channel number %s" inbox-channel-number))))
 
-(defun wave-client-ws-parse-wavelet-name (url)
-  (let ((start (string-match "\\`wave://[^/]+/\\([^/]+\\)/\\(.+\\)\\'" url)))
-    (assert (zerop start))
-    (cons (match-string 1 url) (match-string 2 url))))
+(defun wave-client-ws-open-wave-channel (wave-id)
+  (wave-client-ws-open `(:participant_id ,(concat wave-client-user
+                                                  "@" (wave-client-domain))
+                                         :wave_id ,wave-id
+                                         :wavelet_id_prefix "")
+                       'wave-client-ws-wavelet-callback))
+
+(defun wave-client-ws-ensure-wave-channel-open (wave-id)
+  "Returns the channel number of the channel of the given wave."
+  (wave-client-ws-ensure-connected)
+  (or (gethash wave-id wave-client-ws-wave-channels)
+      (let ((channel (wave-client-ws-open-wave-channel wave-id)))
+        (puthash wave-id channel wave-client-ws-wave-channels)
+        channel)))
 
 (defun wave-client-ws-parse-op (raw-op)
   (destructuring-bind (type arg) raw-op
@@ -194,68 +266,45 @@ Returns the channel number, which can be passed into
        (assert (eql arg t) t)
        (wave-make-no-op)))))
 
-(defun wave-client-ws-parse-delta (wavelet-name raw-delta)
-  (destructuring-bind (&key operation author hashed_version) raw-delta
-    (destructuring-bind (&key history_hash version) hashed_version
-      (wave-make-delta :wavelet-name wavelet-name
-                       :author author
-                       :pre-version (cons version 0)
-                       :post-version (cons (+ version (length operation)) 0)
-                       :timestamp 0
-                       :ops (map 'vector 'wave-client-ws-parse-op
-                                 operation)))))
-
-(defun wave-client-ws-inbox-callback (type response)
-  (assert (equal type "waveserver.ProtocolWaveletUpdate"))
-  (let* ((wavelet-name (wave-client-ws-parse-wavelet-name
-                        (plist-get response :wavelet_name)))
-         (deltas (map 'list (lambda (raw-delta)
-                              (wave-client-ws-parse-delta wavelet-name
-                                                          raw-delta))
-                      (plist-get response :applied_delta))))
-    (assert deltas)
-    (let ((wavelet (gethash wavelet-name wave-client-ws-current-raw-inbox)))
-      (when (zerop (car (wave-delta-pre-version (first deltas))))
-        ;; Apparently the server rewrote the history.
-        (setq wavelet nil))
-      (when (null wavelet)
-        (setq wavelet (wave-make-wavelet
-                       :wavelet-name wavelet-name
-                       :creator (wave-delta-author (first deltas))))
-        (puthash wavelet-name wavelet wave-client-ws-current-raw-inbox))
-      (dolist (delta deltas)
-        (wave-apply-delta wavelet delta)))))
-
-(defun wave-client-ws-translate-inbox (raw-data)
-  (let ((accu (list)))
-    (maphash (lambda (key value)
-               (push
-                `(:id ,(cdr (wave-wavelet-wavelet-name value))
-                      :digest
-                      ;; TODO(ohler): do something smart
-                      ,(let ((doc (gethash 'digest (wave-wavelet-docs value))))
-                         (if (null doc)
-                             ""
-                           (format "%S" (wave-doc-content doc))))
-                      :unread 0         ; we don't know
-                      :creator "author" ; we don't know
-                      )
-                     accu))
-             raw-data)
-    (sort* accu #'string< :key (lambda (plist) (plist-get plist :id)))))
+(defun wave-client-ws-translate-inbox (wavelets)
+  (let ((plists
+         (loop for wavelet in wavelets
+               collect
+               `(:id ,(cdr (wave-wavelet-wavelet-name wavelet))
+                     :digest
+                     ,(let ((doc (gethash 'digest (wave-wavelet-docs wavelet))))
+                        (if (null doc)
+                            ""
+                          ;; TODO(ohler): extract character content
+                          ;; from document properly
+                          (format "%S" (wave-doc-content doc))))
+                     :unread 0             ; we don't know
+                     :creator "author"     ; we don't know
+                     ))))
+    (sort* plists #'string< :key (lambda (plist) (plist-get plist :id)))))
 
 ;;; Functions for the Wave mode to use:
 
-(defun wave-ws-send-delta (delta)
-  (error "nyi"))
+(defun wave-ws-get-wave (wave-id)
+  (wave-client-ws-ensure-wave-channel-open wave-id)
+  ;; Wait an arbitrary amount of time for some data to arrive.
+  (accept-process-output nil 1)
+  (let ((wave (gethash wave-id wave-client-ws-wavelet-states)))
+    (if (null wave)
+        nil
+      (assert (plusp (hash-table-count wave)))
+      (let ((wavelets (list)))
+        (maphash (lambda (key wavelet)
+                   (push wavelet wavelets))
+                 wave)
+        (nreverse wavelets)))))
 
 (defun wave-ws-get-inbox ()
-  (wave-client-ws-ensure-connected)
-  ;; Wait an arbitrary amount of time for some data to arrive.
-  (sit-for 1)
-  (wave-client-ws-translate-inbox wave-client-ws-current-raw-inbox))
+  (let ((indexwave (wave-ws-get-wave wave-client-ws-indexwave-wave-id)))
+    (let ((inbox (wave-client-ws-translate-inbox indexwave)))
+      inbox)))
 
-(defun wave-ws-get-wave (wave-id)
+(defun wave-ws-send-delta (delta)
   (error "nyi"))
 
 (provide 'wave-client-websocket)

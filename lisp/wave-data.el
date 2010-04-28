@@ -31,6 +31,7 @@
 (defstruct (wave-wavelet (:constructor wave-make-wavelet))
   (wavelet-name (assert nil) :read-only t)
   (creator (assert nil) :read-only t)
+  (creation-time (assert nil) :read-only t)
   ;; A distinct version.
   (version (cons 0 0))
   (last-modified-time nil)
@@ -51,7 +52,6 @@
 
 ;; Intended to be immutable.
 (defstruct (wave-delta (:constructor wave-make-delta))
-  (wavelet-name (assert nil) :read-only t)
   (author (assert nil) :read-only t)
   ;; A distinct version.
   (pre-version (assert nil) :read-only t)
@@ -89,16 +89,8 @@
   ;; The operation components, a vector.
   (components (assert nil) :read-only t))
 
-(defun wave-make-initial-wavelet (wavelet-name creator)
-  (wave-make-wavelet
-   :wavelet-name wavelet-name
-   :creator creator))
-
 (defun wave-apply-delta (wavelet delta)
   "Apply DELTA to WAVELET.  Operates by modifying WAVELET."
-  (assert (equal (wave-wavelet-wavelet-name wavelet)
-                 (wave-delta-wavelet-name delta))
-          t)
   (assert (equal (wave-wavelet-version wavelet)
                  (wave-delta-pre-version delta))
           t)

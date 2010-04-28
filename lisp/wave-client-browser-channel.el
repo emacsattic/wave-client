@@ -329,26 +329,27 @@ into the format defined by `wave-get-inbox'."
 (defun wave-client-extract-blip (blip-plist)
   "Extract information about a single blip from the raw
   BLIP-PLIST."
-  (list :blip-id (intern (plist-get blip-plist :1))
-        :authors (plist-get blip-plist :7)
-        :modified-version (wave-client-extract-long (plist-get blip-plist :15))
-        :modified-time (wave-client-extract-long (plist-get blip-plist :3))
-        :content (mapcar
-                  (lambda (token)
-                    (let ((start-element (plist-get token :4))
-                          (text (plist-get token :2))
-                          (end-element (plist-get token :5))
-                          (boundary (plist-get token :1)))
-                      (cond (start-element
-                             (list (intern (plist-get start-element :1))
-                                   (wave-client-extract-attributes
-                                    (plist-get start-element :2))))
-                            (text text)
-                            (end-element 'end)
-                            (boundary
-                             (wave-client-extract-boundary boundary))
-                            (t 'unknown))))
-                  (plist-get (plist-get blip-plist :16) :2))))
+  (wave-make-doc
+   :doc-id (intern (plist-get blip-plist :1))
+   :contributors (plist-get blip-plist :7)
+   :last-modified-version (wave-client-extract-long (plist-get blip-plist :15))
+   :last-modified-time (wave-client-extract-long (plist-get blip-plist :3))
+   :content (mapcar
+             (lambda (token)
+               (let ((start-element (plist-get token :4))
+                     (text (plist-get token :2))
+                     (end-element (plist-get token :5))
+                     (boundary (plist-get token :1)))
+                 (cond (start-element
+                        (list (intern (plist-get start-element :1))
+                              (wave-client-extract-attributes
+                               (plist-get start-element :2))))
+                       (text text)
+                       (end-element 'end)
+                       (boundary
+                        (wave-client-extract-boundary boundary))
+                       (t 'unknown))))
+             (plist-get (plist-get blip-plist :16) :2))))
 
 (defun wave-client-extract-long (long)
   "From a 2-byte long, extract a single long integer"
@@ -359,22 +360,24 @@ into the format defined by `wave-get-inbox'."
 
 (defun wave-client-extract-wavelet (wavelet-plist)
   "Extract information about a wavelet from the raw WAVE-PLIST,
-  transforming it into the format detined by `wave-get-wave'"
+  transforming it into the format defined by `wave-get-wave'"
   (let* ((wavelet (plist-get wavelet-plist :1))
          (metadata (plist-get wavelet :1))
          (blips (plist-get wavelet :2))
          (blips-hashtable (make-hash-table)))
     (loop for blip across blips do
           (let ((extracted-blip (wave-client-extract-blip blip)))
-            (puthash (plist-get extracted-blip :blip-id)
+            (puthash (wave-doc-doc-id extracted-blip)
                      extracted-blip blips-hashtable)))
-    (list :participants (plist-get metadata :5)
-          :creator (plist-get metadata :3)
-          :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
-          :creation-time (wave-client-extract-long
-                          (plist-get metadata :4))
-          :version (wave-client-extract-long (plist-get metadata :7))
-          :blips blips-hashtable)))
+    (wave-make-wavelet
+     :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
+     :creator (plist-get metadata :3)
+     :version (cons (wave-client-extract-long (plist-get metadata :7))
+                    (plist-get metadata :9))
+     :last-modified-time (wave-client-extract-long (plist-get metadata :8))
+     :creation-time (wave-client-extract-long (plist-get metadata :4))
+     :participants (plist-get metadata :5)
+     :docs blips-hashtable)))
 
 (defun wave-client-extract-wave (wave-plist)
   "Extract information about a single wave from the raw

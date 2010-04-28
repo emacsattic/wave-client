@@ -137,8 +137,7 @@
   "Given a USER such as 'ahyatt@googlewave.com', return a
   shortened form without redundant domain info, such as
   'ahyatt'."
-  (replace-regexp-in-string (concat "@"
-                                    (or wave-client-domain "googlewave.com"))
+  (replace-regexp-in-string (concat "@" (wave-client-domain))
                             ""
                             user))
 
@@ -209,8 +208,9 @@
                     (format "Add participant to wavelet %s: " (cdr wavelet-name)))))
      (list wavelet-name address)))
   (wave-update-add-participant wavelet-name
-                               (wave-display-header-version
-                                (gethash (cdr wavelet-name) wave-display-wavelets))
+                               (car
+                                (wave-display-header-version
+                                 (gethash (cdr wavelet-name) wave-display-wavelets)))
                                participant-id)
   ;; perhaps need some delay before doing this?
   (wave-display-refresh))
@@ -247,6 +247,7 @@
                                 (:include wave-display-node))
   participants
   wavelet-name
+  ;; A distinction version (pair of version and distinction).
   version
   )
 
@@ -282,7 +283,7 @@
 
 (defun wave-display-blip (node)
   (let* ((blip (wave-display-blip-raw-blip node))
-         (blip-id (plist-get blip :blip-id))
+         (blip-id (wave-doc-doc-id blip))
          (level (wave-display-node-indentation-level node)))
     (indent-to (* 2 level))
     (when (wave-display-blip-unreadp node)
@@ -292,12 +293,12 @@
         (insert "(unread) ")
         (add-text-properties begin (point)
                              '(face wave-blip-unread))))
-    (wave-display-users (plist-get blip :authors)
+    (wave-display-users (wave-doc-contributors blip)
                         'wave-blip-authors)
     (let ((op-stack '())
           (current-paragraph-start (point))
           (boundaries '()))
-      (dolist (op (plist-get blip :content))
+      (dolist (op (wave-doc-content blip))
         (cond ((stringp op) (insert op))
               ((eq op 'end)
                (let ((closed-op (pop op-stack)))
@@ -373,8 +374,8 @@
       (wave-display-raw-doc (wave-display-raw-doc node)))))
 
 (defun wave-display-compute-blip-unread-p (wavelet-name raw-blip)
-  (let* ((blip-id (plist-get raw-blip :blip-id))
-         (blip-modified-version (plist-get raw-blip :modified-version))
+  (let* ((blip-id (wave-doc-doc-id raw-blip))
+         (blip-modified-version (wave-doc-last-modified-version raw-blip))
          (read-state (cdr (assoc (cdr wavelet-name)
                                  wave-display-wave-read-state)))
          (blip-read-version
@@ -387,19 +388,19 @@
 
 (defun* wave-display-add-conversation (ewoc wavelet)
   "Parse conversation in WAVELET and add the resulting display nodes to EWOC."
-  (let* ((blip-table (plist-get wavelet :blips))
+  (let* ((blip-table (wave-wavelet-docs wavelet))
          (manifest (gethash 'conversation blip-table))
-         (wavelet-name (plist-get wavelet :wavelet-name)))
+         (wavelet-name (wave-wavelet-wavelet-name wavelet)))
     (if (null manifest)
         (ewoc-set-hf ewoc "No manifest?!\n" "")
       (ewoc-set-hf ewoc "" "")
       (ewoc-enter-last ewoc
                        (wave-display-make-header
                         :indentation-level 0
-                        :version (plist-get wavelet :version)
-                        :participants (plist-get wavelet :participants)
+                        :version (wave-wavelet-version wavelet)
+                        :participants (wave-wavelet-participants wavelet)
                         :wavelet-name wavelet-name))
-      (let ((content (plist-get manifest :content)))
+      (let ((content (wave-doc-content manifest)))
         (assert (not (null content)) nil "Empty manifest: %S" manifest)
         (assert (eql (caar content) 'conversation) nil
                 "Manifest does not begin with conversation element: %S"
@@ -471,13 +472,13 @@
             (warn "No conversation element found: %S" manifest)))))))
 
 (defun wave-display-add-raw-wavelet (ewoc wavelet)
-  (let ((blip-table (plist-get wavelet :blips))
+  (let ((blip-table (wave-wavelet-docs wavelet))
         (header (wave-display-make-header
-                      :indentation-level 0
-                      :wavelet-name (plist-get wavelet :wavelet-name)
-                      :participants (plist-get wavelet :participants)
-                      :version (plist-get wavelet :version)
-                      :is-debugging-info t)))
+                 :indentation-level 0
+                 :wavelet-name (wave-wavelet-wavelet-name wavelet)
+                 :participants (wave-wavelet-participants wavelet)
+                 :version (wave-wavelet-version wavelet)
+                 :is-debugging-info t)))
     (puthash (cdr (wave-display-header-wavelet-name header))
              header wave-display-wavelets)
     (ewoc-enter-last ewoc header)
@@ -570,10 +571,10 @@
            (warn "Found annotations in m/read, ignoring"))))))))
 
 (defun wave-display-process-user-data (wavelet)
-  (let* ((blip-table (plist-get wavelet :blips))
+  (let* ((blip-table (wave-wavelet-docs wavelet))
          (m/read (gethash 'm/read blip-table)))
     (unless (null m/read)
-      (wave-display-process-m/read (plist-get m/read :content)))))
+      (wave-display-process-m/read (wave-doc-content m/read)))))
 
 (defun wave-display (wave-label wave-id)
   "Display in a new or re-used buffer the wave WAVE-ID in wave-display-mode.
@@ -596,22 +597,22 @@ Returns the new buffer."
     (erase-buffer)
     (let ((ewoc (ewoc-create 'wave-display-node-printer nil nil t)))
       (setq wave-display-ewoc ewoc)
-      (let ((conv-wavelets (remove-if-not
-                            (lambda (wavelet)
-                              (string-match "!conv\\+"
-                                            (cdr (plist-get wavelet
-                                                            :wavelet-name))))
-                            wavelets))
-            (user-wavelets (remove-if-not
-                            (lambda (wavelet)
-                              (string-match "!user\\+"
-                                            (cdr (plist-get wavelet
-                                                            :wavelet-name))))
-                            wavelets)))
+      (let ((conv-wavelets
+             (remove-if-not
+              (lambda (wavelet)
+                (string-match "!conv\\+"
+                              (cdr (wave-wavelet-wavelet-name wavelet))))
+              wavelets))
+            (user-wavelets
+             (remove-if-not
+              (lambda (wavelet)
+                (string-match "!user\\+"
+                              (cdr (wave-wavelet-wavelet-name wavelet))))
+              wavelets)))
         ;; First, create read state table.
         (setq wave-display-wave-read-state
               (mapcar (lambda (wavelet)
-                        (cons (cdr (plist-get wavelet :wavelet-name))
+                        (cons (cdr (wave-wavelet-wavelet-name wavelet))
                               (wave-make-wavelet-read-state)))
                       conv-wavelets))
         (assert (<= (length user-wavelets) 1))
