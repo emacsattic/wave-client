@@ -73,6 +73,36 @@ counted separately.  This should be idempotent."
                (setq expanded (cons e expanded))))))
     (nreverse expanded)))
 
+(defmacro defproto (name &rest struct-elems)
+  "Replacement for defstruct, allows for proto field number
+  mappings"
+  (let ((struct-elems (if (stringp (car struct-elems))
+                          (cdr struct-elems)
+                        struct-elems))
+        (struct-name (gensym name)))
+    `(progn (defstruct ,struct-name
+              ,@(mapcar (lambda (property) (list (car property) nil :read-only t))
+                        struct-elems))
+            (defun ,(intern (concat (symbol-name name) "-to-proto")) (item)
+              (let ((plist '()))
+                (dolist (field-def (quote ,struct-elems))
+                  (let ((field-val
+                         (funcall
+                          (intern
+                           (concat (symbol-name (quote ,struct-name))
+                                   "-"
+                                   (symbol-name (car field-def)))) item)))
+                    (when field-val
+                      (setq plist
+                            (plist-put plist (cadr field-def) field-val)))))
+                plist))
+            (defun ,(intern (concat (symbol-name name) "-proto"))
+              (&rest fields)
+              (,(intern (concat (symbol-name name) "-to-proto"))
+               (apply (quote
+                       ,(intern (concat "make-" (symbol-name struct-name))))
+                      fields))))))
+
 (provide 'wave-util)
 
 ;;; wave-util.el ends here

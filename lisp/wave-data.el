@@ -60,7 +60,7 @@
   (post-version nil :read-only t)
   ;; Filled in on the server, nil for deltas that we create
   (timestamp nil :read-only t)
-  ;; An array of operations
+  ;; A list of operations
   (ops (assert nil) :read-only t))
 
 (defstruct (wave-op (:constructor wave-make-op))
@@ -77,6 +77,11 @@
   (address (assert nil) :read-only t))
 
 ;; Intended to be immutable.
+(defstruct (wave-blip-submit (:include wave-op)
+                             (:constructor wave-make-blip-submit))
+  (blip-id (assert nil) :read-only t))
+
+;; Intended to be immutable.
 (defstruct (wave-no-op (:include wave-op)
                        (:constructor wave-make-no-op))
   )
@@ -88,6 +93,40 @@
   (doc-id (assert nil) :read-only t)
   ;; The operation components, a vector.
   (components (assert nil) :read-only t))
+
+;; Intended to be immutable.
+(defstruct (wave-component (:constructor wave-make-component)))
+
+;; Intended to be immutable.
+(defstruct (wave-text (:include wave-component)
+                      (:constructor wave-make-text-component))
+  ;; A string
+  (text (assert nil) :read-only t))
+
+;; Intended to be immutable.
+(defstruct (wave-retain-item-count
+            (:include wave-component)
+            (:constructor wave-make-retain-item-count))
+  ;; An integer
+  (num (assert nil) :read-only t))
+
+;; Intended to be immutable.
+(defstruct (wave-element-start (:include wave-component)
+                               (:constructor wave-make-element-start))
+  ;; A string of a certain well-defined set of types ("blip", etc.)
+  (type (assert nil) :read-only t)
+  ;; A list of wave-key-value-pairs
+  (attributes nil :read-only t))
+
+;; Intended to be immutable.
+(defstruct (wave-element-end
+            (:include wave-component)
+            (:constructor wave-make-element-end)))
+
+;; Intended to be immutable.
+(defstruct (wave-key-value-pair (:constructor wave-make-key-value-pair))
+  (key (assert nil) :read-only t)
+  (value (assert nil) :read-only t))
 
 (defun wave-make-initial-wavelet (wavelet-name creator)
   (wave-make-wavelet

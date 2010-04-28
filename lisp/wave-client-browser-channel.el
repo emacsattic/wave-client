@@ -89,6 +89,16 @@ incremented for every request.")
 (defvar wave-client-queue '()
   "A queue of json messages from the GET browser channel")
 
+(defconst wave-bc-op-to-message-type
+  '((add-participant . 5975636)
+    (remove-participant . 5975541)
+    (blip-submit . 5926533)
+    (mutate-document . 9184307)))
+
+(defun wave-bc-message-type (op)
+  "From an operation OP, return the relevant message type"
+  (cdr (assoc op wave-bc-op-to-message-type)))
+
 (defun wave-client-assert-connected ()
   (unless (and wave-client-auth-cookie
                wave-client-session)
@@ -403,6 +413,59 @@ is defined, we will do a POST with the data."
             (buffer-string)))
       (wave-client-kill-current-process-buffer))))
 
+;;; Protos definitions see:
+;;; http://www.waveprotocol.org/draft-protocol-specs/draft-protocol-spec#anchor11
+;;; Note the numerical values there don't always seem to be right.  We
+;;; use the correct version.
+
+(defproto wave-submit-delta-request
+  (wave-id :1)
+  (wavelet-id :2)
+  (delta :3))
+
+(defproto wave-delta
+  (version :1)
+  (user-id :3)
+  (op-list :4))
+
+(defproto wave-op
+  (type-id :1)
+  (add-participant :4)
+  (remove-participant :5)
+  (blip-submit :10)
+  (mutate-document :23))
+
+(defproto wave-add-participant
+  (user-id :1))
+
+(defproto wave-remove-participant
+  (user-id :1))
+
+(defproto wave-mutate-document
+  (document-id :1)
+  (operation :2))
+
+(defproto wave-blip-submit
+  (blip-id :1))
+
+(defproto wave-document-operation
+  (component :2))
+
+(defproto wave-component
+  (annotation-boundary :1)
+  (text :2)
+  (element-start :4)
+  (element-end :5)
+  (retain-item-count :6))
+
+(defproto wave-key-value-pair
+  (key :1)
+  (value :2))
+
+(defproto wave-element-start
+  (type :1)
+  (attributes :2))
+
 (defun wave-client-populate-gsession ()
   "Get the gsessionid that Wave uses to keep track of channels."
   (setq wave-client-gsession
@@ -502,11 +565,93 @@ list of data pieces to post."
   (let ((req (wave-client-wrap-browser-channel-req `(:1 ,test-id) 'echo)))
       (wave-client-post-to-browser-channel (list req))))
 
+(defun wave-bc-add-participant-to-proto (op)
+  (wave-op-proto
+   :type-id (wave-bc-message-type 'add-participant)
+   :add-participant
+   (wave-add-participant-proto :user-id
+                               (wave-add-participant-addess op))))
+
+(defun wave-bc-remove-participant-to-proto (op)
+  (wave-op-proto
+   :type-id (wave-bc-message-type 'remove-participant)
+   :remove-participant
+   (wave-remove-participant-proto :user-id
+                                  (wave-add-participant-addess op))))
+
+(defun wave-bc-blip-submit-to-proto (op)
+  (wave-op-proto
+   :type-id (wave-bc-message-type 'blip-submit)
+   :blip-submit
+   (wave-blip-submit-proto :blip-id (wave-blip-submit-blip-id op))))
+
+(defun wave-bc-doc-op-to-proto (op)
+  (wave-op-proto
+   :type-id (wave-bc-message-type 'mutate-document)
+   :mutate-document
+   (wave-mutate-document-proto
+    :document-id (wave-doc-op-doc-id op)
+    :operation
+    (wave-document-operation-proto
+     :component
+     (apply 'vector
+            (mapcar
+             (lambda (c)
+               (etypecase c
+                 (wave-text
+                  (wave-component-proto
+                   :text (wave-text-text c)))
+                 (wave-element-start
+                  (wave-component-proto
+                   :element-start
+                   (wave-element-start-proto
+                    :type (wave-element-start-type c)
+                    :attributes
+                    (apply 'vector
+                           (mapcar
+                            (lambda (p)
+                              (wave-key-value-pair-proto
+                               :key (wave-key-value-pair-key p)
+                               :value (wave-key-value-pair-value p)))
+                            (wave-element-start-attributes c))))))
+                 (wave-element-end
+                  (wave-component-proto
+                   :element-end t))
+                 (wave-retain-item-count
+                  (wave-component-proto
+                   :retain-item-count (wave-retain-item-count-num c)))))
+             (wave-doc-op-components op)))))))
+
+(defun wave-bc-delta-to-proto (delta)
+  "Convert DELTA to a protocol buffer."
+  (wave-submit-delta-request-proto
+   :wave-id (car (wave-delta-wavelet-name delta))
+   :wavelet-id (cdr (wave-delta-wavelet-name delta))
+   :delta (wave-delta-proto
+           :version (vector (wave-delta-pre-version delta) 0)
+           :user-id (wave-delta-author delta)
+           :op-list (apply 'vector
+                           (mapcar
+                            (lambda (op)
+                              (etypecase op
+                                (wave-add-participant
+                                 (wave-bc-add-participant-to-proto op))
+                                (wave-remove-participant
+                                 (wave-bc-remove-participant-to-proto op))
+                                (wave-blip-submit
+                                 (wave-bc-blip-submit-to-proto op))
+                                (wave-doc-op
+                                 (wave-bc-doc-op-to-proto op))))
+                            (wave-delta-ops delta))))))
+
 ;; Functions for the Wave mode to use:
 
 (defun wave-bc-send-delta (delta)
   (wave-client-post-to-browser-channel
-   (list (wave-client-wrap-browser-channel-req delta 'view-submit))))
+   (list (wave-client-wrap-browser-channel-req (wave-bc-delta-to-proto delta)
+                                               'view-submit))))
+
+(defalias 'wave-client-send-delta 'wave-bc-send-delta)
 
 (defun wave-bc-get-inbox ()
   (wave-client-extract-waves (wave-client-get-waves)))

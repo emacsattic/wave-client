@@ -28,135 +28,23 @@
 
 (require 'wave-client)
 
-(defconst wave-update-op-to-message-type
-  '((add-participant . 5975636)
-    (remove-participant . 5975541)
-    (blip-submit . 5926533)
-    (mutate-document . 9184307)))
-
-(defun wave-update-message-type (op)
-  "From an operation OP, return the relevant message type"
-  (cdr (assoc op wave-update-op-to-message-type)))
-
-(defmacro defproto (name &rest struct-elems)
-  "Replacement for defstruct, allows for proto field number
-  mappings"
-  (let ((struct-elems (if (stringp (car struct-elems))
-                          (cdr struct-elems)
-                        struct-elems)))
-    `(progn (defstruct ,name
-              ,@(mapcar (lambda (property) (list (car property) nil :read-only t))
-                        struct-elems))
-            (defun ,(intern (concat (symbol-name name) "-to-proto")) (item)
-              (let ((plist '()))
-                (dolist (field-def (quote ,struct-elems))
-                  (let ((field-val
-                         (funcall
-                          (intern
-                           (concat (symbol-name (quote ,name))
-                                   "-"
-                                   (symbol-name (car field-def)))) item)))
-                    (when field-val
-                      (setq plist
-                            (plist-put plist (cadr field-def) field-val)))))
-                plist))
-            (defun ,(intern (concat (symbol-name name) "-proto"))
-              (&rest fields)
-              (,(intern (concat (symbol-name name) "-to-proto"))
-               (apply (quote ,(intern (concat "make-" (symbol-name name))))
-                      fields))))))
-
-;;; Protos definitions see:
-;;; http://www.waveprotocol.org/draft-protocol-specs/draft-protocol-spec#anchor11
-;;; Note the numerical values there don't always seem to be right.  We
-;;; use the correct version.
-
-(defproto wave-submit-delta-request
-  (wave-id :1)
-  (wavelet-id :2)
-  (delta :3))
-
-(defproto wave-delta
-  (version :1)
-  (user-id :3)
-  (op-list :4))
-
-(defproto wave-op
-  (type-id :1)
-  (add-participant :4)
-  (remove-participant :5)
-  (blip-submit :10)
-  (mutate-document :23))
-
-(defproto wave-add-participant
-  (user-id :1))
-
-(defproto wave-mutate-document
-  (document-id :1)
-  (operation :2))
-
-(defproto wave-blip-submit
-  (blip-id :1))
-
-(defproto wave-document-operation
-  (component :2))
-
-(defproto wave-component
-  (annotation-boundary :1)
-  (text :2)
-  (element-start :4)
-  (element-end :5)
-  (retain-item-count :6))
-
-(defproto wave-key-value-pair
-  (key :1)
-  (value :2))
-
-(defproto wave-element-start
-  (type :1)
-  (attributes :2))
-
-(defun wave-update-start-proto (name &rest prop-alist)
+(defun wave-update-start (name &rest prop-alist)
   "Start an element with name NAME."
-  (wave-component-proto :element-start
-                        (wave-element-start-proto
-                         :type name
-                         :attributes
-                         (apply 'vector
-                                (mapcar (lambda (kv)
-                                          (wave-key-value-pair-proto
-                                           :key (car kv)
-                                           :value (cdr kv))) prop-alist)))))
+  (wave-make-element-start
+   :type name
+   :attributes (mapcar (lambda (kv)
+                         (wave-make-key-value-pair
+                          :key (car kv)
+                          :value (cdr kv))) prop-alist)))
 
-(defun wave-update-end-proto ()
-  "End the innermost element."
-  (wave-component-proto :element-end t))
+(defun wave-update-end ()
+  "End the innermost element.  Just for balance with
+`wave-update-start'."
+  (wave-make-element-end))
 
-(defun wave-update-skip-proto (num)
-  "Proto to skip NUM elements."
-  (wave-component-proto
-   :retain-item-count num))
-
-(defun wave-update-blip-version-proto (blip-id version)
-  "Make a proto storing the blip version start-element.  Must be
-  closed by a close-element."
-  (wave-element-start-proto
-           :type "blip"
-           :attributes (vector
-                        (wave-key-value-pair-proto
-                         :key "i" :value blip-id)
-                        (wave-key-value-pair-proto
-                         :key "v"
-                         :value version))))
-
-(defun wave-update-wavelet-id-proto (wavelet-id)
-  "Make a wavelet-id proto.  Must be closed by a close-element."
-  (wave-element-start-proto :type "wavelet"
-                            :attributes
-                            (vector
-                             (wave-key-value-pair-proto
-                              :key "i" :value
-                              (cdr wavelet-id)))))
+(defun wave-update-skip (num)
+  "Structure to skip NUM elements."
+  (wave-make-retain-item-count :num num))
 
 (defun wave-update-mark-blip-read (blip-id user-header conv-header
                                            m-read)
@@ -164,68 +52,41 @@
   (let* ((pos (position-if (lambda (elem)
                              (eq (car elem) 'blip)) m-read))
          (new-read-op
-          (wave-update-blip-version-proto blip-id (wave-display-header-version conv-header)))
-         (ops (if m-read
+          (wave-update-start "blip" (cons "i" blip-id)
+                             (cons "v"
+                                   (wave-display-header-version conv-header))))
+         (op (if m-read
                   (vector
-                   (wave-update-skip-proto pos)
-                   (wave-component-proto
-                    :element-start
-                    new-read-op)
-                   (wave-update-end-proto)
-                   (wave-update-skip-proto (- (length m-read) pos)))
+                   (wave-update-skip pos)
+                   new-read-op
+                   (wave-update-end)
+                   (wave-update-skip (- (length m-read) pos)))
                 ;; adding to m/read
-                (vector (wave-update-wavelet-id-proto
-                         (wave-display-header-wavelet-name
-                          conv-header))
-                        (wave-update-end-proto)
+                (vector (wave-update-start "wavelet"
+                                           (cons "i"
+                                                 (cdr (wave-display-header-wavelet-name
+                                                       conv-header))))
+                        (wave-update-end)
                         new-read-op
-                        (wave-update-end-proto)))))
-    (wave-client-send-delta
-     (wave-update-mutation (car (wave-display-header-wavelet-name user-header))
-                           (cdr (wave-display-header-wavelet-name user-header))
-                           (wave-display-header-version user-header)
-                           "m/read" ops))))
-
-(defun wave-update-mutation (wave-id wavelet-id wavelet-version document-id ops)
-  "Produce a mutation WAVELET-ID in WAVE-ID."
-  (wave-submit-delta-request-proto
-   :wave-id wave-id
-   :wavelet-id wavelet-id
-   :delta
-   (wave-delta-proto
-    :version (vector wavelet-version 0)
-    :user-id (wave-client-email-address)
-    :op-list (vector (wave-op-proto
-                      :type-id (wave-update-message-type 'mutate-document)
-                      :mutate-document
-                      (wave-mutate-document-proto
-                       :document-id document-id
-                       :operation
-                       (wave-document-operation-proto :component ops)))))))
+                        (wave-update-end)))))
+    (wave-update-submit (wave-display-header-wavelet-name user-header)
+                        (wave-display-header-version user-header)
+                        (list (wave-make-doc-op :doc-id "m/read" :components op)))))
 
 (defun wave-update-submit (wavelet-name wavelet-version ops)
   (check-type ops sequence)
   (check-type wavelet-version (integer 0 *))
-  (wave-client-send-delta
-   (wave-submit-delta-request-proto
-    :wave-id (car wavelet-name)
-    :wavelet-id (cdr wavelet-name)
-    :delta
-    (wave-delta-proto
-     ;; TODO(ohler): add support for versions above 2**31
-     :version (vector wavelet-version 0)
-     :user-id (wave-client-email-address)
-     :op-list (coerce ops 'vector)))))
+  (wave-client-send-delta (wave-make-delta
+                           :wavelet-name wavelet-name
+                           :pre-version wavelet-version
+                           :author (wave-client-email-address)
+                           :ops (coerce ops 'vector))))
 
 (defun wave-update-add-participant (wavelet-name wavelet-version
                                                  participant-address)
   (wave-update-submit wavelet-name wavelet-version
-                      (list
-                       (wave-op-proto
-                        :type-id (wave-update-message-type 'add-participant)
-                        :add-participant
-                        (wave-add-participant-proto
-                         :user-id participant-address)))))
+                      (list (wave-make-add-participant
+                             :address participant-address))))
 
 (defun wave-update-new-blip-id ()
   "Generate a new blip id."
@@ -235,62 +96,44 @@
                                                   blip-id text
                                                   num-to-skip rest-to-skip)
   "Insert text into a new blip."
-  (wave-client-send-delta
-   (wave-update-mutation (car conv-wavelet-name) (cdr conv-wavelet-name)
-                         wavelet-version
-                         blip-id
-                         (apply 'vector
-                                (append
-                                 (when (and num-to-skip (> num-to-skip 0))
-                                   (list (wave-update-skip-proto num-to-skip)))
-                                 (list (wave-component-proto :text text))
-                                 (when (and rest-to-skip (> rest-to-skip 0))
-                                   (list (wave-update-skip-proto rest-to-skip))))))))
+  (wave-update-submit conv-wavelet-name
+                      wavelet-version
+                      (list (wave-make-doc-op
+                             :doc-id blip-id
+                             :components
+                             (apply 'vector
+                                    (append
+                                     (when (and num-to-skip (> num-to-skip 0))
+                                       (list (wave-update-skip num-to-skip)))
+                                     (list (wave-make-text :text text))
+                                     (when (and rest-to-skip (> rest-to-skip 0))
+                                       (list (wave-update-skip rest-to-skip)))))))))
 
 (defun wave-update-new-blip (conv-wavelet-name wavelet-version
                                                conv-to-skip
                                                rest-to-skip)
   "Create a new blip."
-  (let ((new-blip-id (wave-update-new-blip-id)))
+  (let* ((new-blip-id (wave-update-new-blip-id))
+         (empty-blip (vector
+                      (wave-update-start "body")
+                      (wave-update-start "line")
+                      (wave-update-end) (wave-update-end)))
+         (conversation-ins (vector
+                            (wave-update-skip conv-to-skip)
+                            (wave-update-start "blip"
+                                               `("id" . ,new-blip-id ))
+                            (wave-update-end)
+                            (wave-update-skip rest-to-skip))))
     (wave-debug "Adding new blip: %s" new-blip-id)
-    (wave-client-send-delta
-     (let ((empty-blip-ops (vector
-                            (wave-update-start-proto "body")
-                            (wave-update-start-proto "line")
-                            (wave-update-end-proto) (wave-update-end-proto)))
-           (conversation-ops (vector
-                              (wave-update-skip-proto conv-to-skip)
-                              (wave-update-start-proto "blip"
-                                                       `("id" . ,new-blip-id ))
-                              (wave-update-end-proto)
-                              (wave-update-skip-proto rest-to-skip))))
-       (wave-submit-delta-request-proto
-        :wave-id (car conv-wavelet-name)
-        :wavelet-id (cdr conv-wavelet-name)
-        :delta
-        (wave-delta-proto
-         :version (vector wavelet-version 0)
-         :user-id (wave-client-email-address)
-         :op-list (vector (wave-op-proto
-                           :type-id (wave-update-message-type 'mutate-document)
-                           :mutate-document
-                           (wave-mutate-document-proto
-                            :document-id new-blip-id
-                            :operation
-                            (wave-document-operation-proto
-                             :component empty-blip-ops)))
-                          (wave-op-proto
-                           :type-id
-                           (wave-update-message-type 'mutate-document)
-                           :mutate-document
-                           (wave-mutate-document-proto
-                            :document-id "conversation"
-                            :operation
-                            (wave-document-operation-proto
-                             :component conversation-ops)))
-                          (wave-op-proto :type-id (wave-update-message-type 'blip-submit)
-                                         :blip-submit
-                                         (wave-blip-submit-proto :blip-id new-blip-id)))))))
+    (wave-update-submit conv-wavelet-name wavelet-version
+                        (list (wave-make-doc-op
+                               :doc-id new-blip-id
+                               :components empty-blip)
+                              (wave-make-doc-op
+                               :doc-id "conversation"
+                               :components conversation-ins)
+                              (wave-make-blip-submit
+                               :blip-id new-blip-id)))
     new-blip-id))
 
 (provide 'wave-update)
