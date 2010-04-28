@@ -104,6 +104,9 @@
   "Whether to display raw data.")
 (make-variable-buffer-local 'wave-display-debugging-info)
 
+(defvar wave-display-blips (make-hash-table :test 'equal)
+  "Blip id to blip hashtable")
+
 (defvar wave-display-wave-read-state
   nil
   "An alist that maps wavelet id strings to wavelet read states.")
@@ -480,14 +483,17 @@
                            (ewoc-enter-last
                              ewoc
                              ;; TODO: implement inline
-                             (wave-display-make-blip
-                              :wavelet-name wavelet-name
-                              :raw-blip raw-blip
-                              :blip-id blip-id
-                              :indentation-level level
-                              :collapsedp nil
-                              :unreadp (wave-display-compute-blip-unread-p
-                                        wavelet-name raw-blip)))))))
+                             (let ((blip
+                                    (wave-display-make-blip
+                                     :wavelet-name wavelet-name
+                                     :raw-blip raw-blip
+                                     :blip-id blip-id
+                                     :indentation-level level
+                                     :collapsedp nil
+                                     :unreadp (wave-display-compute-blip-unread-p
+                                               wavelet-name raw-blip))))
+                               (puthash blip-id blip wave-display-blips)
+                               blip))))))
                    (push 'blip op-stack)))
                 (peer
                  ;; ignore

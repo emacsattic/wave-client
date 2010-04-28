@@ -57,6 +57,22 @@ Wave doesn't use +, though, so we substitute - instead."
     (replace-regexp-in-string
      "+" "-" (substring (base64-encode-string (apply 'string s)) 0 digits))))
 
+(defun wave-expand-raw (raw)
+  "Canonicalize the operation data RAW.
+The wave data has a few rules that need following: annotations
+are not counted as operations, and each character of a string is
+counted separately.  This should be idempotent."
+  (let ((expanded '()))
+    (dolist (e raw)
+      (cond ((stringp e)
+             (dolist (c (string-to-sequence e 'list))
+               (setq expanded (cons (char-to-string c) expanded))))
+            (t
+             (unless (and (listp e)
+                          (eq (car e) '@boundary))
+               (setq expanded (cons e expanded))))))
+    (nreverse expanded)))
+
 (provide 'wave-util)
 
 ;;; wave-util.el ends here

@@ -50,13 +50,17 @@
   "The wavelet id the edit is in.")
 (make-variable-buffer-local 'wave-edit-wavelet-id)
 
+(defvar wave-edit-blip-id nil
+  "The blip id, or nil if it doesn't exist yet")
+(make-variable-buffer-local 'wave-edit-blip-id)
+
 (defun wave-edit-finish ()
   "Finish editing the wave."
   ;; TODO(ahyatt) Execute this on killing the buffer too.
   (interactive)
   (kill-buffer wave-edit-pre-command-buffer)
   (setq wave-edit-pre-command-buffer nil)
-  (with-current-buffer wave-edit-parent-wave
+  (with-current-buffer wave-edit-parent-buf
     (set-window-configuration (car wave-display-saved-window-configuration))
     (goto-char (marker-position (cdr wave-display-saved-window-configuration)))
     (setq wave-display-saved-window-configuration nil))
@@ -76,6 +80,8 @@ If we are in draft mode, though, do nothing."
 
 (defun wave-edit-maybe-send-updates ()
   "Send updates of the buffer to Wave."
+  (with-current-buffer wave-edit-parent-buf
+    (wave-display-refresh))
   ;; TODO(ahyatt): Implement draft mode
   (when wave-edit-pre-command-buffer
     (let* ((new (current-buffer))
@@ -84,12 +90,40 @@ If we are in draft mode, though, do nothing."
            (new-endpos (point-max)))
       ;; Initially, let's just handle two scenarios:
       ;; 1) Text appended
-      ;; 2) Text deleted
+      ;; 2) Text deleted (from the end) - not done yet
       (cond ((> (buffer-size new)
                 (buffer-size old))
              ;; need wavelet-id, blip-id
-             (wave-debug "Appended %s:"(buffer-substring-no-properties
-                                        old-endpos new-endpos)))))))
+             (wave-edit-append-text (buffer-substring-no-properties
+                                     old-endpos new-endpos)))))))
+
+(defun wave-edit-get-conv-wavelet-name ()
+  (cons wave-edit-wavelet-id
+        (concat (wave-client-domain) "!conv+root")))
+
+(defun wave-edit-get-wavelet-version ()
+  (let ((conv-wavelet-name (wave-edit-get-conv-wavelet-name)))
+    (wave-display-header-version
+     (with-current-buffer wave-edit-parent-buf
+       (gethash (cdr conv-wavelet-name)
+                wave-display-wavelets)))))
+
+(defun wave-edit-blip ()
+  (let* ((blip-id (intern wave-edit-blip-id)))
+    (wave-display-blip-raw-blip
+     (with-current-buffer wave-edit-parent-buf
+       (gethash blip-id wave-display-blips)))))
+
+(defun wave-edit-append-text (text)
+  "Append TEXT to blip."
+  (let* ((content (wave-expand-raw
+                   (plist-get (wave-edit-blip) :content)))
+         (skip-to (- (length content) 1)))
+    (wave-debug "Appending text.  Filtered content: %s skip-to: %d" content skip-to)
+    (wave-update-insert-text (wave-edit-get-conv-wavelet-name)
+                             (wave-edit-get-wavelet-version)
+                             wave-edit-blip-id
+                             text skip-to 1)))
 
 (defun wave-edit-new-blip ()
   "Create a new blip."
@@ -97,12 +131,10 @@ If we are in draft mode, though, do nothing."
          (conv-data (with-current-buffer wave-edit-parent-buf
                       (gethash wavelet-id
                                wave-display-conversations)))
-         (conv-wavelet-id (concat (wave-client-domain) "!conv+root"))
-         (wavelet-version (wave-display-header-version
-                           (with-current-buffer wave-edit-parent-buf
-                             (gethash conv-wavelet-id wave-display-wavelets))))
+         (conv-wavelet-name (wave-edit-get-conv-wavelet-name))
+         (wavelet-version (wave-edit-get-wavelet-version))
          (num-to-skip
-          (+ 1
+          (+ 2  ;; +1 for the next, + 1 for the end
              (position-if (lambda (elem)
                             (and (listp elem)
                                  (eq (car elem) 'blip)
@@ -110,9 +142,10 @@ If we are in draft mode, though, do nothing."
                                         (symbol-name wave-edit-previous-blip))))
                           conv-data)))
          (num-left (- (length conv-data) num-to-skip)))
-    (wave-update-new-blip (cons wavelet-id conv-wavelet-id)
-                          wavelet-version
-                          num-to-skip num-left)))
+    (setq wave-edit-blip-id
+          (wave-update-new-blip conv-wavelet-name
+                                wavelet-version
+                                num-to-skip num-left))))
 
 (define-minor-mode wave-edit-mode
   "Mode for editing a wave's blip." nil "Wave Edit"
