@@ -106,8 +106,7 @@ Every wave takes up one line."
           (wave-list-str-truncate (plist-get summary-alist :digest)
                                   digest-length)
           (wave-list-str-truncate
-           (replace-regexp-in-string (concat "@"
-                                             (or wave-client-domain "googlewave.com"))
+           (replace-regexp-in-string (concat "@" (wave-client-domain))
                                      ""
                                      (plist-get summary-alist :creator))
            author-length))))

@@ -53,8 +53,10 @@
                              (eq (car elem) 'blip)) m-read))
          (new-read-op
           (wave-update-start "blip" (cons "i" blip-id)
-                             (cons "v"
-                                   (wave-display-header-version conv-header))))
+                             (cons
+                              "v"
+                              (car
+                               (wave-display-header-version conv-header)))))
          (op (if m-read
                   (vector
                    (wave-update-skip pos)
@@ -75,12 +77,10 @@
 
 (defun wave-update-submit (wavelet-name wavelet-version ops)
   (check-type ops sequence)
-  (check-type wavelet-version (integer 0 *))
   (wave-client-send-delta (wave-make-delta
-                           :wavelet-name wavelet-name
                            :pre-version wavelet-version
                            :author (wave-client-email-address)
-                           :ops (coerce ops 'vector))))
+                           :ops (coerce ops 'vector)) wavelet-name))
 
 (defun wave-update-add-participant (wavelet-name wavelet-version
                                                  participant-address)

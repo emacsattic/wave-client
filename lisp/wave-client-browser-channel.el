@@ -51,7 +51,7 @@
   "The buffer of the curl process")
 
 (defconst wave-client-task-type
-  '((echo . 0) (view-submit . 1100) (presence-open . 2012))
+  '((echo . 0) (view-submit . 1100))
   "Task type to ids sent with browser channel requests.")
 
 (defvar wave-client-auth-cookie
@@ -339,26 +339,27 @@ into the format defined by `wave-get-inbox'."
 (defun wave-client-extract-blip (blip-plist)
   "Extract information about a single blip from the raw
   BLIP-PLIST."
-  (list :blip-id (intern (plist-get blip-plist :1))
-        :authors (plist-get blip-plist :7)
-        :modified-version (wave-client-extract-long (plist-get blip-plist :15))
-        :modified-time (wave-client-extract-long (plist-get blip-plist :3))
-        :content (mapcar
-                  (lambda (token)
-                    (let ((start-element (plist-get token :4))
-                          (text (plist-get token :2))
-                          (end-element (plist-get token :5))
-                          (boundary (plist-get token :1)))
-                      (cond (start-element
-                             (list (intern (plist-get start-element :1))
-                                   (wave-client-extract-attributes
-                                    (plist-get start-element :2))))
-                            (text text)
-                            (end-element 'end)
-                            (boundary
-                             (wave-client-extract-boundary boundary))
-                            (t 'unknown))))
-                  (plist-get (plist-get blip-plist :16) :2))))
+  (wave-make-doc
+   :doc-id (intern (plist-get blip-plist :1))
+   :contributors (plist-get blip-plist :7)
+   :last-modified-version (wave-client-extract-long (plist-get blip-plist :15))
+   :last-modified-time (wave-client-extract-long (plist-get blip-plist :3))
+   :content (mapcar
+             (lambda (token)
+               (let ((start-element (plist-get token :4))
+                     (text (plist-get token :2))
+                     (end-element (plist-get token :5))
+                     (boundary (plist-get token :1)))
+                 (cond (start-element
+                        (list (intern (plist-get start-element :1))
+                              (wave-client-extract-attributes
+                               (plist-get start-element :2))))
+                       (text text)
+                       (end-element 'end)
+                       (boundary
+                        (wave-client-extract-boundary boundary))
+                       (t 'unknown))))
+             (plist-get (plist-get blip-plist :16) :2))))
 
 (defun wave-client-extract-long (long)
   "From a 2-byte long, extract a single long integer"
@@ -369,22 +370,24 @@ into the format defined by `wave-get-inbox'."
 
 (defun wave-client-extract-wavelet (wavelet-plist)
   "Extract information about a wavelet from the raw WAVE-PLIST,
-  transforming it into the format detined by `wave-get-wave'"
+  transforming it into the format defined by `wave-get-wave'"
   (let* ((wavelet (plist-get wavelet-plist :1))
          (metadata (plist-get wavelet :1))
          (blips (plist-get wavelet :2))
          (blips-hashtable (make-hash-table)))
     (loop for blip across blips do
           (let ((extracted-blip (wave-client-extract-blip blip)))
-            (puthash (plist-get extracted-blip :blip-id)
+            (puthash (wave-doc-doc-id extracted-blip)
                      extracted-blip blips-hashtable)))
-    (list :participants (plist-get metadata :5)
-          :creator (plist-get metadata :3)
-          :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
-          :creation-time (wave-client-extract-long
-                          (plist-get metadata :4))
-          :version (wave-client-extract-long (plist-get metadata :7))
-          :blips blips-hashtable)))
+    (wave-make-wavelet
+     :wavelet-name (cons (plist-get metadata :1) (plist-get metadata :2))
+     :creator (plist-get metadata :3)
+     :version (cons (wave-client-extract-long (plist-get metadata :7))
+                    (plist-get metadata :9))
+     :last-modified-time (wave-client-extract-long (plist-get metadata :8))
+     :creation-time (wave-client-extract-long (plist-get metadata :4))
+     :participants (plist-get metadata :5)
+     :docs blips-hashtable)))
 
 (defun wave-client-extract-wave (wave-plist)
   "Extract information about a single wave from the raw
@@ -426,7 +429,8 @@ is defined, we will do a POST with the data."
 (defproto wave-delta
   (version :1)
   (user-id :3)
-  (op-list :4))
+  (op-list :4)
+  (pre-signature :7))
 
 (defproto wave-op
   (type-id :1)
@@ -622,14 +626,15 @@ list of data pieces to post."
                    :retain-item-count (wave-retain-item-count-num c)))))
              (wave-doc-op-components op)))))))
 
-(defun wave-bc-delta-to-proto (delta)
-  "Convert DELTA to a protocol buffer."
+(defun wave-bc-delta-to-proto (delta wavelet-name)
+  "Convert DELTA of WAVELET-NAME to a protocol buffer."
   (wave-submit-delta-request-proto
-   :wave-id (car (wave-delta-wavelet-name delta))
-   :wavelet-id (cdr (wave-delta-wavelet-name delta))
+   :wave-id (car wavelet-name)
+   :wavelet-id (cdr wavelet-name)
    :delta (wave-delta-proto
-           :version (vector (wave-delta-pre-version delta) 0)
+           :version (vector (car (wave-delta-pre-version delta)) 0)
            :user-id (wave-delta-author delta)
+           :pre-signature (cdr (wave-delta-pre-version delta))
            :op-list (apply 'vector
                            (mapcar
                             (lambda (op)
@@ -646,9 +651,10 @@ list of data pieces to post."
 
 ;; Functions for the Wave mode to use:
 
-(defun wave-bc-send-delta (delta)
+(defun wave-bc-send-delta (delta wavelet-name)
   (wave-client-post-to-browser-channel
-   (list (wave-client-wrap-browser-channel-req (wave-bc-delta-to-proto delta)
+   (list (wave-client-wrap-browser-channel-req (wave-bc-delta-to-proto
+                                                delta wavelet-name)
                                                'view-submit))))
 
 (defalias 'wave-client-send-delta 'wave-bc-send-delta)
