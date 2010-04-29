@@ -176,12 +176,16 @@
      (wave-display-maybe-mark-unread element)
      (return))))
 
+(defun wave-display-user-data-wavelet ()
+  "Return the user data wavelet."
+  (concat (wave-client-domain)
+          "!user+" (wave-client-email-address)))
+
 (defun wave-display-maybe-mark-unread (blip-node)
   "If a blip is unread, mark it read."
   (let ((blip (ewoc-data blip-node)))
     (when (wave-display-blip-unreadp blip)
-      (let* ((user-wavelet-id (concat (wave-client-domain)
-                                      "!user+" (wave-client-email-address)))
+      (let* ((user-wavelet-id (wave-display-user-data-wavelet))
              (conv-wavelet-id (concat (wave-client-domain) "!conv+root"))
              (user-header (gethash user-wavelet-id wave-display-wavelets))
              (conv-header (gethash conv-wavelet-id wave-display-wavelets)))
@@ -381,7 +385,9 @@
          (blip-read-version
           (gethash blip-id (wave-wavelet-read-state-blips read-state)))
          (all-read-version (wave-wavelet-read-state-all read-state)))
-    (and (or (null blip-read-version)
+    ;; If there is no user-data wavelet, then consider everything to be read.
+    (and (gethash (wave-display-user-data-wavelet) wave-display-wavelets)
+         (or (null blip-read-version)
              (< blip-read-version blip-modified-version))
          (or (null all-read-version)
              (< all-read-version blip-modified-version)))))
