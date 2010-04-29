@@ -211,11 +211,11 @@
           (address (read-string
                     (format "Add participant to wavelet %s: " (cdr wavelet-name)))))
      (list wavelet-name address)))
-  (wave-update-add-participant wavelet-name
-                               (car
-                                (wave-display-header-version
-                                 (gethash (cdr wavelet-name) wave-display-wavelets)))
-                               participant-id)
+  (wave-update-add-participant
+   wavelet-name
+   (wave-display-header-version
+    (gethash (cdr wavelet-name) wave-display-wavelets))
+   participant-id)
   ;; perhaps need some delay before doing this?
   (wave-display-refresh))
 

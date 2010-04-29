@@ -99,6 +99,10 @@
           ) 
     (set-process-filter wave-client-ws-process 'wave-client-ws-filter)))
 
+(defun wave-client-ws-fixup-control-codes (text)
+  "Fix issues with JSON control code detection"
+  (replace-regexp-in-string "\\\\\\([^\\\"]\\)" "\\\\\\\\\\\\\\1" text))
+
 (defun wave-client-ws-filter (process output)
   "Filter OUTPUT from our websocket PROCESS.  As websocket
 responses come back, parse them and call the appropriate callbacks."
@@ -108,7 +112,9 @@ responses come back, parse them and call the appropriate callbacks."
     (let ((packets (split-string output "[\0\377]" t)))
       (dolist (packet packets)
         (unless (string-match "^HTTP" packet)    ; Ignore HTTP bit
-         (let* ((response (json-read-from-string packet))
+          (wave-debug "Received packet: %s" packet)
+         (let* ((response (json-read-from-string
+                           (wave-client-ws-fixup-control-codes packet)))
                 (channel-number (plist-get response :sequenceNumber))
                 (message-type (plist-get response :messageType))
                 (message (json-read-from-string (plist-get response
@@ -125,17 +131,35 @@ responses come back, parse them and call the appropriate callbacks."
   "Send the raw TEXT as a websocket packet."
   (unless wave-client-ws-process
     (error "No webserver process to send data to!"))
+  (wave-debug "Sending to websocket: %s" text)
   (process-send-string wave-client-ws-process
                        (concat (unibyte-string ?\0) text
                                (unibyte-string ?\377))))
 
+(defun wave-client-ws-json-fixup (text)
+  "Fix some escapification issues that cause problems."
+  (replace-regexp-in-string "\\\\\\\\" "\\\\"
+                            (replace-regexp-in-string "\\\\+/" "/" text)))
+
+(defun wave-client-ws-cntrl-fixup (text)
+  (replace-regexp-in-string "\\([[:cntrl:]]\\)"
+                            (lambda (c)
+                              (format "\\\\%03o" (string-to-char c)))
+                            text))
+
+(defun wave-client-ws-strip-domain (id)
+  "Strip the domain from ID."
+  (replace-regexp-in-string (format "%s!" (wave-client-domain))
+                            "" id))
+
 (defun wave-client-ws-send (type obj channel-number)
   (wave-client-ws-send-raw
-   (json-encode
-    `(:version 0
-               :sequenceNumber ,channel-number
-               :messageType ,type
-               :messageJson ,(json-encode obj)))))
+   (wave-client-ws-json-fixup
+    (json-encode
+     `(:version 0
+                :sequenceNumber ,channel-number
+                :messageType ,type
+                :messageJson ,(json-encode obj))))))
 
 (defun wave-client-ws-open (obj callback)
   "Sends the req OBJ to the server and opens a channel for responses.
@@ -153,9 +177,9 @@ Returns the channel number."
 (defun wave-client-ws-submit (obj)
   "Submits OBJ to the server."
   (let ((channel-number (incf wave-client-ws-channel-num)))
-    (error "nyi")
-    (wave-client-ws-send "waveserver.ProtocolSubmitRequest" obj channel-number)
-    ))
+    (wave-client-ws-ensure-connected)
+    (wave-client-ws-send "waveserver.ProtocolSubmitRequest"
+                         obj channel-number)))
 
 ;; Two possible formats:
 ;; wave://waveletdomain/wavelocalid/waveletlocalid
@@ -188,19 +212,21 @@ Returns the channel number."
   (destructuring-bind (&key operation author hashed_version) raw-delta
     (destructuring-bind (&key history_hash version) hashed_version
       (wave-make-delta :author author
-                       :pre-version (cons version 0)
+                       :pre-version (cons version history_hash)
                        :post-version (cons (+ version (length operation)) 0)
                        :timestamp 0
                        :ops (map 'vector 'wave-client-ws-parse-op
                                  operation)))))
 
 (defun wave-client-ws-wavelet-callback (type response)
+  (wave-debug "Received response %s" response)
   (ecase (intern-soft type)
     (waveserver.ProtocolWaveletUpdate
      (let* ((wavelet-name (wave-client-ws-parse-wavelet-name
                            (plist-get response :wavelet_name)))
             (wave-id (car wavelet-name))
             (wavelet-id (cdr wavelet-name))
+            (resulting-version (plist-get response :resulting_version))
             (deltas (map 'list #'wave-client-ws-parse-delta
                          (plist-get response :applied_delta))))
        (assert deltas)
@@ -219,7 +245,11 @@ Returns the channel number."
                             :creation-time (wave-delta-timestamp (first deltas))))
              (puthash wavelet-id wavelet wave))
            (dolist (delta deltas)
-             (wave-apply-delta wavelet delta))))))
+             (wave-apply-delta wavelet delta))
+           (setf (wave-wavelet-version wavelet)
+                 (cons
+                  (plist-get resulting-version :version)
+                  (plist-get resulting-version :history_hash)))))))
     ((nil)
      (error "Unknown type: %S; response=%S" type response))))
 
@@ -287,6 +317,66 @@ Returns the channel number."
                      ))))
     (sort* plists #'string< :key (lambda (plist) (plist-get plist :id)))))
 
+(defun wave-ws-component-to-obj (component)
+  (etypecase
+   component
+   (wave-text
+    (list :characters (wave-text-text component)))
+   (wave-element-start
+    (list :element_start
+          (list :attribute
+                (apply 'vector
+                       (mapcar (lambda (p)
+                                 (list :key (wave-key-value-pair-key p)
+                                       :value (wave-key-value-pair-value p)))
+                               (wave-element-start-attributes component))))))
+   (wave-element-end
+    (list :element_end t))
+   (wave-retain-item-count
+    (list :retain_item_count (wave-retain-item-count-num content)))))
+
+(defun wave-ws-op-to-obj (op)
+  (etypecase
+   op
+   (wave-add-participant
+    (list :add_participant
+                  (wave-add-participant-address op)))
+   (wave-remove-participant
+    (list :remove_participant
+          (wave-remove-participant-address op)))
+   (wave-blip-submit
+    (list :blip_id (wave-blip-submit-blip-id op)))
+   (wave-doc-op
+    (list :mutate_document
+           (list :document_id (wave-doc-op-doc-id op)
+                 :document_operation
+                 (list :component
+                       (apply 'vector
+                              (mapcar (lambda (c)
+                                        (wave-ws-component-to-obj c))
+                                      (wave-doc-op-components op)))))))))
+
+(defun wave-ws-wavelet-name-to-url (wavelet-name)
+  "Turn WAVELET-NAME to a wave:// url."
+  (format "wave://%s/%s/%s" wave-client-domain
+          (wave-client-ws-strip-domain
+           (car wavelet-name))
+          (wave-client-ws-strip-domain
+           (cdr wavelet-name))))
+
+(defun wave-ws-delta-to-obj (delta wavelet-name)
+  (list :wavelet_name (wave-ws-wavelet-name-to-url wavelet-name)
+        :delta
+        (list :hashed_version
+              (list :version (car (wave-delta-pre-version delta))
+                    :history_hash (wave-client-ws-cntrl-fixup
+                                   (cdr (wave-delta-pre-version delta))))
+              :author (wave-delta-author delta)
+              :operation (apply 'vector
+                                (mapcar (lambda (op)
+                                          (wave-ws-op-to-obj op))
+                                        (wave-delta-ops delta))))))
+
 ;;; Functions for the Wave mode to use:
 
 (defun wave-ws-get-wave (wave-id)
@@ -308,8 +398,8 @@ Returns the channel number."
     (let ((inbox (wave-client-ws-translate-inbox indexwave)))
       inbox)))
 
-(defun wave-ws-send-delta (delta)
-  (error "nyi"))
+(defun wave-ws-send-delta (delta wavelet-name)
+  (wave-client-ws-submit (wave-ws-delta-to-obj delta wavelet-name)))
 
 (provide 'wave-client-websocket)
 

@@ -97,11 +97,11 @@ args ARGS."
 
 ;; Functions for the Wave mode to use:
 
-(defun wave-client-send-delta (delta)
+(defun wave-client-send-delta (delta wavelet-name)
   "Send DELTA to the wave server."
   (ecase wave-client-connection-method
-    (browser-channel (wave-bc-send-delta delta))
-    (websocket (wave-ws-send-delta delta))))
+    (browser-channel (wave-bc-send-delta delta wavelet-name))
+    (websocket (wave-ws-send-delta delta wavelet-name))))
 
 (defun wave-get-inbox ()
   "List all waves in the inbox. For the exact format, see

@@ -135,8 +135,8 @@
 
 (defun wave-apply-delta (wavelet delta)
   "Apply DELTA to WAVELET.  Operates by modifying WAVELET."
-  (assert (equal (wave-wavelet-version wavelet)
-                 (wave-delta-pre-version delta))
+  (assert (equal (car (wave-wavelet-version wavelet))
+                 (car (wave-delta-pre-version delta)))
           t)
   (loop
    with timestamp = (wave-delta-timestamp delta)
