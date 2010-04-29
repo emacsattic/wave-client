@@ -58,7 +58,8 @@
   "Finish editing the wave."
   ;; TODO(ahyatt) Execute this on killing the buffer too.
   (interactive)
-  (kill-buffer wave-edit-pre-command-buffer)
+  (wave-edit-new-blip (buffer-string))
+; (kill-buffer wave-edit-pre-command-buffer)
   (setq wave-edit-pre-command-buffer nil)
   (with-current-buffer wave-edit-parent-buf
     (set-window-configuration (car wave-display-saved-window-configuration))
@@ -125,7 +126,7 @@ If we are in draft mode, though, do nothing."
                              wave-edit-blip-id
                              text skip-to 1)))
 
-(defun wave-edit-new-blip ()
+(defun wave-edit-new-blip (text)
   "Create a new blip."
   (let* ((wavelet-id wave-edit-wavelet-id)
          (conv-data (with-current-buffer wave-edit-parent-buf
@@ -145,7 +146,7 @@ If we are in draft mode, though, do nothing."
     (setq wave-edit-blip-id
           (wave-update-new-blip conv-wavelet-name
                                 wavelet-version
-                                num-to-skip num-left))))
+                                num-to-skip num-left text))))
 
 (define-minor-mode wave-edit-mode
   "Mode for editing a wave's blip." nil "Wave Edit"
@@ -155,10 +156,7 @@ If we are in draft mode, though, do nothing."
   ;; before-change-functions and after-change-functions, so that we
   ;; can update the position of the cursor.
   (make-local-variable 'pre-command-hook)
-  (make-local-variable 'post-command-hook)
-  (wave-edit-new-blip)
-  (add-to-list 'pre-command-hook 'wave-edit-note-before-state)
-  (add-to-list 'post-command-hook 'wave-edit-maybe-send-updates))
+  (make-local-variable 'post-command-hook))
 
 (provide 'wave-edit)
 

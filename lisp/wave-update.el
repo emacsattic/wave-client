@@ -111,13 +111,15 @@
 
 (defun wave-update-new-blip (conv-wavelet-name wavelet-version
                                                conv-to-skip
-                                               rest-to-skip)
+                                               rest-to-skip text)
   "Create a new blip."
   (let* ((new-blip-id (wave-update-new-blip-id))
          (empty-blip (vector
                       (wave-update-start "body")
                       (wave-update-start "line")
-                      (wave-update-end) (wave-update-end)))
+                      (wave-update-end)
+                      (wave-make-text :text text)
+                      (wave-update-end)))
          (conversation-ins (vector
                             (wave-update-skip conv-to-skip)
                             (wave-update-start "blip"
@@ -126,14 +128,14 @@
                             (wave-update-skip rest-to-skip))))
     (wave-debug "Adding new blip: %s" new-blip-id)
     (wave-update-submit conv-wavelet-name wavelet-version
-                        (list (wave-make-doc-op
+                        (list (wave-make-blip-submit
+                               :blip-id new-blip-id)
+                              (wave-make-doc-op
                                :doc-id new-blip-id
                                :components empty-blip)
                               (wave-make-doc-op
                                :doc-id "conversation"
-                               :components conversation-ins)
-                              (wave-make-blip-submit
-                               :blip-id new-blip-id)))
+                               :components conversation-ins)))
     new-blip-id))
 
 (provide 'wave-update)

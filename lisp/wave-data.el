@@ -99,7 +99,7 @@
 
 ;; Intended to be immutable.
 (defstruct (wave-text (:include wave-component)
-                      (:constructor wave-make-text-component))
+                      (:constructor wave-make-text))
   ;; A string
   (text (assert nil) :read-only t))
 

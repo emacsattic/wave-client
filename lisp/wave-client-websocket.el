@@ -59,6 +59,9 @@
 (defvar wave-client-ws-wavelet-states nil
   "Nested hash table of wave id -> wavelet id -> wave-wavelet object.")
 
+(defvar wave-client-ws-unfinished-packets ""
+  "The text of packets that have not ended")
+
 (defun wave-client-ws-reset ()
   (interactive)
   (setq wave-client-ws-process nil
@@ -113,19 +116,25 @@ responses come back, parse them and call the appropriate callbacks."
       (dolist (packet packets)
         (unless (string-match "^HTTP" packet)    ; Ignore HTTP bit
           (wave-debug "Received packet: %s" packet)
-         (let* ((response (json-read-from-string
-                           (wave-client-ws-fixup-control-codes packet)))
+          (if (not (string-match "}$" packet))
+              (setq wave-client-ws-unfinished-packets
+                    packet)
+            (let* ((response (json-read-from-string
+                           (wave-client-ws-fixup-control-codes
+                            (concat wave-client-ws-unfinished-packets
+                                    packet))))
                 (channel-number (plist-get response :sequenceNumber))
                 (message-type (plist-get response :messageType))
                 (message (json-read-from-string (plist-get response
                                                            :messageJson))))
-           (let ((callback (gethash channel-number
-                                    wave-client-ws-channel-callbacks)))
-             (if callback
-                 (funcall callback message-type message)
-               (message
-                "No callback for channel number %s, discarding message %s %S"
-                channel-number message-type message)))))))))
+              (let ((callback (gethash channel-number
+                                       wave-client-ws-channel-callbacks)))
+                (setq wave-client-ws-unfinished-packets "")
+                (if callback
+                    (funcall callback message-type message)
+                  (message
+                   "No callback for channel number %s, discarding message %s %S"
+                   channel-number message-type message))))))))))
 
 (defun wave-client-ws-send-raw (text)
   "Send the raw TEXT as a websocket packet."
@@ -138,8 +147,11 @@ responses come back, parse them and call the appropriate callbacks."
 
 (defun wave-client-ws-json-fixup (text)
   "Fix some escapification issues that cause problems."
-  (replace-regexp-in-string "\\\\\\\\" "\\\\"
-                            (replace-regexp-in-string "\\\\+/" "/" text)))
+  (replace-regexp-in-string
+   "\\\\\\\\" "\\\\"
+   (replace-regexp-in-string
+    "\\\\+/" "/"
+    (replace-regexp-in-string "null" "{}" text))))
 
 (defun wave-client-ws-cntrl-fixup (text)
   (replace-regexp-in-string "\\([[:cntrl:]]\\)"
@@ -324,16 +336,19 @@ Returns the channel number."
     (list :characters (wave-text-text component)))
    (wave-element-start
     (list :element_start
-          (list :attribute
-                (apply 'vector
-                       (mapcar (lambda (p)
-                                 (list :key (wave-key-value-pair-key p)
-                                       :value (wave-key-value-pair-value p)))
-                               (wave-element-start-attributes component))))))
+          (append (list :type (wave-element-start-type component))
+                  (when (wave-element-start-attributes component)
+                    (list :attribute
+                          (apply
+                           'vector
+                           (mapcar (lambda (p)
+                                     (list :key (wave-key-value-pair-key p)
+                                           :value (wave-key-value-pair-value p)))
+                                   (wave-element-start-attributes component))))))))
    (wave-element-end
     (list :element_end t))
    (wave-retain-item-count
-    (list :retain_item_count (wave-retain-item-count-num content)))))
+    (list :retain_item_count (wave-retain-item-count-num component)))))
 
 (defun wave-ws-op-to-obj (op)
   (etypecase
@@ -345,7 +360,9 @@ Returns the channel number."
     (list :remove_participant
           (wave-remove-participant-address op)))
    (wave-blip-submit
-    (list :blip_id (wave-blip-submit-blip-id op)))
+    (list :mutate_document
+          (list :document_id (wave-blip-submit-blip-id op)
+                :document_operation '())))
    (wave-doc-op
     (list :mutate_document
            (list :document_id (wave-doc-op-doc-id op)

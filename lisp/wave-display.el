@@ -34,6 +34,7 @@
   (require 'cl))
 (eval-and-compile
   (require 'wave-client)
+  (require 'wave-edit)
   (require 'wave-update))
 
 ;;; Code:
@@ -71,11 +72,25 @@
   "The format argument, which must have one %s, for a Wave's
   buffer name.")
 
+(defface wave-insert-marker
+  '((((class color)) (:background "Red"))
+    (t (:bold t)))
+  "Face used for the insert marker."
+  :group 'wave-display)
+
+(defconst wave-blip-buffer-name
+  "*Wave Message*")
+
+(defvar wave-display-buffer-format "*Wave %s*"
+  "The format argument, which must have one %s, for a Wave's
+  buffer name.")
+
 (defvar wave-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map "n" 'wave-display-next-blip)
     (define-key map "p" 'wave-display-previous-blip)
     (define-key map "R" 'wave-display-toggle-debugging-info)
+    (define-key map "i" 'wave-display-insert-blip)
     (define-key map "g" 'wave-display-refresh)
     (define-key map "q" 'wave-kill-wave-display)
     (define-key map "a" 'wave-display-add-participant)
@@ -94,15 +109,25 @@
   "Whether to display raw data.")
 (make-variable-buffer-local 'wave-display-debugging-info)
 
+(defvar wave-display-blips (make-hash-table :test 'equal)
+  "Blip id to blip hashtable")
+(make-variable-buffer-local 'wave-display-blips)
+
 (defvar wave-display-wave-read-state
   nil
-  "An alist that maps wavelet id strings to wavelet wavelet read states.")
+  "An alist that maps wavelet id strings to wavelet read states.")
 (make-variable-buffer-local 'wave-display-wave-read-state)
 
 (defvar wave-display-wavelets
   (make-hash-table :test 'equal)
   "Hash table of wavelet ids to wavelets.")
 (make-variable-buffer-local 'wave-display-wavelets)
+
+(defvar wave-display-saved-window-configuration
+  nil
+  "The window configuration before an insert or edit takes
+  place.")
+(make-variable-buffer-local 'wave-display-saved-window-configuration)
 
 (defstruct (wave-wavelet-read-state (:constructor wave-make-wavelet-read-state))
   (blips (make-hash-table))
@@ -432,13 +457,16 @@
                   (conversation-found
                    (warn
                     "Found two conversations in manifest, displaying only one")
-                   (return-from 'wave-display-add-conversation))
+                   (return-from wave-display-add-conversation))
                   (op-stack
-                   (error "Convegrsation element not at top-level"))
+                   (error "Conversation element not at top-level"))
                   (t
                    (setq conversation-found t)
                    (push `(0 nil nil) thread-stack)
-                   (push 'conversation op-stack))))
+                   (push 'conversation op-stack)
+                   (puthash (car wavelet-name)
+                            content
+                            wave-display-conversations))))
                 (@boundary
                  (warn "Found annotations in manifest, ignoring"))
                 (thread
@@ -595,6 +623,24 @@ Returns the new buffer."
     (wave-display-refresh)
     (current-buffer)))
 
+(defun wave-display-insert-blip ()
+  "Insert a blip in the current wavelet."
+  (interactive)
+  (setq wave-display-saved-window-configuration
+        (cons (current-window-configuration) (point-marker)))
+  (delete-other-windows)
+  (let ((compose-buf (get-buffer-create wave-blip-buffer-name))
+        (current-buf (current-buffer))
+        (blip (ewoc-data (ewoc-locate wave-display-ewoc))))
+    (split-window-vertically -10)
+    (switch-to-buffer compose-buf)
+    (setq wave-edit-parent-buf current-buf)
+    (setq wave-edit-previous-blip
+          (wave-display-blip-blip-id blip))
+    (setq wave-edit-wavelet-id
+          (car (wave-display-blip-wavelet-name blip)))
+    (wave-edit-mode)))
+
 (defun wave-display-refresh ()
   (interactive)
   (assert (eql major-mode 'wave-display-mode))
@@ -644,7 +690,8 @@ Returns the new buffer."
         ;;selective-display t
         ;;selective-display-ellipses t
         )
-  (add-hook 'post-command-hook 'wave-display-highlight-blip t t))
+  (add-hook 'post-command-hook 'wave-display-highlight-blip t t)
+  (setq left-margin-width 1))
 
 (provide 'wave-display)
 
