@@ -107,18 +107,19 @@ responses come back, parse them and call the appropriate callbacks."
         (json-key-type nil))
     (let ((packets (split-string output "[\0\377]" t)))
       (dolist (packet packets)
-        (let* ((response (json-read-from-string packet))
-               (channel-number (plist-get response :sequenceNumber))
-               (message-type (plist-get response :messageType))
-               (message (json-read-from-string (plist-get response
-                                                          :messageJson))))
-          (let ((callback (gethash channel-number
-                                   wave-client-ws-channel-callbacks)))
-            (if callback
-                (funcall callback message-type message)
-              (message
-               "No callback for channel number %s, discarding message %s %S"
-               channel-number message-type message))))))))
+        (unless (string-match "^HTTP" packet)    ; Ignore HTTP bit
+         (let* ((response (json-read-from-string packet))
+                (channel-number (plist-get response :sequenceNumber))
+                (message-type (plist-get response :messageType))
+                (message (json-read-from-string (plist-get response
+                                                           :messageJson))))
+           (let ((callback (gethash channel-number
+                                    wave-client-ws-channel-callbacks)))
+             (if callback
+                 (funcall callback message-type message)
+               (message
+                "No callback for channel number %s, discarding message %s %S"
+                channel-number message-type message)))))))))
 
 (defun wave-client-ws-send-raw (text)
   "Send the raw TEXT as a websocket packet."
