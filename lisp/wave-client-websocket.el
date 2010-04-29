@@ -35,6 +35,9 @@
 
 ;;; Code:
 (eval-and-compile
+  (require 'cl)
+  (require 'json)
+  (require 'wave-data)
   (require 'wave-util)
   (require 'url))
 

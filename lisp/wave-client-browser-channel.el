@@ -37,7 +37,9 @@
 (eval-and-compile
   (require 'cl)
   (require 'json)
-  (require 'url))
+  (require 'url)
+  (require 'wave-util)
+  (require 'wave-data))
 
 
 (defcustom wave-client-server
@@ -665,6 +667,6 @@ list of data pieces to post."
 (defun wave-bc-get-wave (wave-id)
   (wave-client-extract-wave (wave-client-get-wave-raw wave-id)))
 
-(provide 'wave-client)
+(provide 'wave-client-browser-channel)
 
 ;;; wave-client.el ends here

@@ -275,3 +275,5 @@ the websocket backend does, so we use its format verbatim.
              )))
     (assert (endp init) t "Operation did not traverse entire document, remainder: %S")
     (wave-normalize-doc-init (nreverse accu))))
+
+(provide 'wave-data)
