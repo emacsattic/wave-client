@@ -62,6 +62,9 @@
 (defvar wave-client-ws-unfinished-packets ""
   "The text of packets that have not ended")
 
+(defvar wave-client-ws-wave-callbacks (make-hash-table)
+  "Wave id to callback.")
+
 (defun wave-client-ws-reset ()
   (interactive)
   (setq wave-client-ws-process nil
@@ -262,7 +265,11 @@ Returns the channel number."
            (setf (wave-wavelet-version wavelet)
                  (cons
                   (plist-get resulting-version :version)
-                  (plist-get resulting-version :history_hash)))))))
+                  (plist-get resulting-version :history_hash)))
+           (let ((callback (gethash wave-id wave-client-ws-wave-callbacks)))
+             (when callback
+               (funcall callback
+                        (wave-ws-return-wave wave-id))))))))
     ((nil)
      (error "Unknown type: %S; response=%S" type response))))
 
@@ -279,7 +286,9 @@ Returns the channel number."
     ;; open inbox
     (assert wave-client-user nil "wave-client-user must be set")
     (let ((inbox-channel-number (wave-client-ws-ensure-wave-channel-open
-                                 wave-client-ws-indexwave-wave-id)))
+                                 wave-client-ws-indexwave-wave-id
+                                 (gethash wave-client-ws-indexwave-wave-id
+                                          wave-client-ws-wave-callbacks))))
       (message "inbox channel number %s" inbox-channel-number))))
 
 (defun wave-client-ws-open-wave-channel (wave-id)
@@ -289,12 +298,13 @@ Returns the channel number."
                                          :wavelet_id_prefix "")
                        'wave-client-ws-wavelet-callback))
 
-(defun wave-client-ws-ensure-wave-channel-open (wave-id)
+(defun wave-client-ws-ensure-wave-channel-open (wave-id callback)
   "Returns the channel number of the channel of the given wave."
   (wave-client-ws-ensure-connected)
   (or (gethash wave-id wave-client-ws-wave-channels)
       (let ((channel (wave-client-ws-open-wave-channel wave-id)))
         (puthash wave-id channel wave-client-ws-wave-channels)
+        (puthash wave-id callback wave-client-ws-wave-callbacks)
         channel)))
 
 (defun wave-client-ws-parse-op (raw-op)
@@ -395,12 +405,7 @@ Returns the channel number."
                                           (wave-ws-op-to-obj op))
                                         (wave-delta-ops delta))))))
 
-;;; Functions for the Wave mode to use:
-
-(defun wave-ws-get-wave (wave-id)
-  (wave-client-ws-ensure-wave-channel-open wave-id)
-  ;; Wait an arbitrary amount of time for some data to arrive.
-  (accept-process-output nil 1)
+(defun wave-ws-return-wave (wave-id)
   (let ((wave (gethash wave-id wave-client-ws-wavelet-states)))
     (if (null wave)
         nil
@@ -411,8 +416,17 @@ Returns the channel number."
                  wave)
         (nreverse wavelets)))))
 
-(defun wave-ws-get-inbox ()
-  (let ((indexwave (wave-ws-get-wave wave-client-ws-indexwave-wave-id)))
+;;; Functions for the Wave mode to use:
+
+(defun wave-ws-get-wave (wave-id callback)
+  (wave-client-ws-ensure-wave-channel-open wave-id callback)
+  ;; Wait an arbitrary amount of time for some data to arrive.
+  (accept-process-output nil 1)
+  (wave-ws-return-wave wave-id))
+
+(defun wave-ws-get-inbox (callback)
+  (let ((indexwave (wave-ws-get-wave wave-client-ws-indexwave-wave-id
+                                     callback)))
     (let ((inbox (wave-client-ws-translate-inbox indexwave)))
       inbox)))
 

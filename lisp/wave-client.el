@@ -103,19 +103,19 @@ args ARGS."
     (browser-channel (wave-bc-send-delta delta wavelet-name))
     (websocket (wave-ws-send-delta delta wavelet-name))))
 
-(defun wave-get-inbox ()
+(defun wave-get-inbox (&optional callback)
   "List all waves in the inbox. For the exact format, see
 http://code.google.com/p/wave-client-for-emacs/wiki/WaveClientDataSpec"
   (ecase wave-client-connection-method
     (browser-channel (wave-bc-get-inbox))
-    (websocket (wave-ws-get-inbox))))
+    (websocket (wave-ws-get-inbox callback))))
 
-(defun wave-get-wave (wave-id)
+(defun wave-get-wave (wave-id &optional callback)
   "Get a wave given a WAVE-ID.  For the exact format, see
 http://code.google.com/p/wave-client-for-emacs/wiki/WaveClientDataSpec"
   (ecase wave-client-connection-method
     (browser-channel (wave-bc-get-wave wave-id))
-    (websocket (wave-ws-get-wave wave-id))))
+    (websocket (wave-ws-get-wave wave-id callback))))
 
 (provide 'wave-client)
 

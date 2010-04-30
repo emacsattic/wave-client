@@ -135,6 +135,8 @@
 
 (defun wave-apply-delta (wavelet delta)
   "Apply DELTA to WAVELET.  Operates by modifying WAVELET."
+  (wave-debug "Received update for wavelet %s version %d"
+              (wave-wavelet-name wavelet) (car (wave-wavelet-version wavelet)))
   (assert (equal (car (wave-wavelet-version wavelet))
                  (car (wave-delta-pre-version delta)))
           t)
