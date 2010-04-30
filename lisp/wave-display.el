@@ -694,7 +694,8 @@ Returns the new buffer."
                         (wave-display-refresh-buffer wavelets)))))))
 
 (define-derived-mode wave-display-mode nil "Wave"
-  "Mode for displaying a wave,
+  "Mode for displaying a wave.
+
 \\{wave-mode-map}"
   :group 'wave-display
   (use-local-map wave-mode-map)
