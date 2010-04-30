@@ -54,11 +54,20 @@
   "The blip id, or nil if it doesn't exist yet")
 (make-variable-buffer-local 'wave-edit-blip-id)
 
+(defun wave-edit-buffer-string ()
+  "Return the buffer string.  This implementation has correct
+  linebreaks."
+  (save-excursion
+    (let ((fill-column 9999))
+      (mark-whole-buffer)
+      (fill-paragraph nil t)
+      (buffer-substring-no-properties (point-min) (point-max)))))
+
 (defun wave-edit-finish ()
   "Finish editing the wave."
   ;; TODO(ahyatt) Execute this on killing the buffer too.
   (interactive)
-  (wave-edit-new-blip (buffer-string))
+  (wave-edit-new-blip (wave-edit-buffer-string))
 ; (kill-buffer wave-edit-pre-command-buffer)
   (setq wave-edit-pre-command-buffer nil)
   (with-current-buffer wave-edit-parent-buf
@@ -157,7 +166,8 @@ If we are in draft mode, though, do nothing."
   ;; before-change-functions and after-change-functions, so that we
   ;; can update the position of the cursor.
   (make-local-variable 'pre-command-hook)
-  (make-local-variable 'post-command-hook))
+  (make-local-variable 'post-command-hook)
+  (longlines-mode t))
 
 (provide 'wave-edit)
 

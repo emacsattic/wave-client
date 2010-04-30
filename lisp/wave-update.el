@@ -109,17 +109,23 @@
                                      (when (and rest-to-skip (> rest-to-skip 0))
                                        (list (wave-update-skip rest-to-skip)))))))))
 
+(defun wave-update-process-text (text)
+  "Transform TEXT into a sequence of line breaks and text."
+  (mapcan (lambda (line-text)
+            (when (> (length line-text) 0)
+              (list (wave-update-start "line")
+                  (wave-update-end)
+                  (wave-make-text :text line-text))))
+          (split-string text "\n")))
+
 (defun wave-update-new-blip (conv-wavelet-name wavelet-version
                                                conv-to-skip
                                                rest-to-skip text)
   "Create a new blip."
   (let* ((new-blip-id (wave-update-new-blip-id))
-         (empty-blip (vector
-                      (wave-update-start "body")
-                      (wave-update-start "line")
-                      (wave-update-end)
-                      (wave-make-text :text text)
-                      (wave-update-end)))
+         (new-blip `[,(wave-update-start "body")
+                     ,@(wave-update-process-text text)
+                     ,(wave-update-end)])
          (conversation-ins (vector
                             (wave-update-skip conv-to-skip)
                             (wave-update-start "blip"
@@ -132,7 +138,7 @@
                                :blip-id new-blip-id)
                               (wave-make-doc-op
                                :doc-id new-blip-id
-                               :components empty-blip)
+                               :components new-blip)
                               (wave-make-doc-op
                                :doc-id "conversation"
                                :components conversation-ins)))

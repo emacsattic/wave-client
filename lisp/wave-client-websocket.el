@@ -155,7 +155,8 @@ responses come back, parse them and call the appropriate callbacks."
    "\\\\\\\\" "\\\\"
    (replace-regexp-in-string
     "\\\\+/" "/"
-    (replace-regexp-in-string "null" "{}" text))))
+    (replace-regexp-in-string "null" "{}"
+                              text))))
 
 (defun wave-client-ws-cntrl-fixup (text)
   (replace-regexp-in-string "\\([[:cntrl:]]\\)"
@@ -340,7 +341,8 @@ Returns the channel number."
   (etypecase
    component
    (wave-text
-    (list :characters (wave-text-text component)))
+    (list :characters (wave-client-ws-cntrl-fixup
+                       (wave-text-text component))))
    (wave-element-start
     (list :element_start
           (append (list :type (wave-element-start-type component))
