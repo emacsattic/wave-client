@@ -67,7 +67,8 @@
   (setq wave-client-ws-process nil
         wave-client-ws-wave-channels nil
         wave-client-ws-channel-callbacks nil
-        wave-client-ws-wavelet-states nil))
+        wave-client-ws-wavelet-states nil
+        wave-client-ws-unfinished-packets nil))
 
 (defun wave-client-ws-connect (url)
   "Open a websocket connection to URL."
@@ -118,7 +119,7 @@ responses come back, parse them and call the appropriate callbacks."
           (wave-debug "Received packet: %s" packet)
           (if (not (string-match "}$" packet))
               (setq wave-client-ws-unfinished-packets
-                    packet)
+                    (concat wave-client-ws-unfinished-packets packet))
             (let* ((response (json-read-from-string
                            (wave-client-ws-fixup-control-codes
                             (concat wave-client-ws-unfinished-packets
