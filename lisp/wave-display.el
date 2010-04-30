@@ -711,7 +711,7 @@ Returns the new buffer."
   (add-hook 'post-command-hook 'wave-display-highlight-blip t t)
   (setq left-margin-width 1)
   (setq wave-display-refresh-timer
-        (run-with-idle-timer 1 t 'wave-display-refresh)))
+        (run-with-idle-timer 5 t 'wave-display-refresh)))
 
 (provide 'wave-display)
 

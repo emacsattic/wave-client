@@ -64,7 +64,8 @@
   (with-current-buffer wave-edit-parent-buf
     (set-window-configuration (car wave-display-saved-window-configuration))
     (goto-char (marker-position (cdr wave-display-saved-window-configuration)))
-    (setq wave-display-saved-window-configuration nil))
+    (setq wave-display-saved-window-configuration nil)
+    (wave-display-refresh))
   (kill-buffer))
 
 (defun wave-edit-note-before-state ()

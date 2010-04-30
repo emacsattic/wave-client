@@ -63,6 +63,14 @@
   "The data rendered in the list of waves.")
 (make-variable-buffer-local 'wave-list-waves)
 
+(defvar wave-list-refresh-timer nil
+  "Refresh timer for the wave list.")
+(make-variable-buffer-local 'wave-list-refresh-timer)
+
+(defvar wave-list-refresh-signature nil
+  "Signature so that we know when to refresh.")
+(make-variable-buffer-local 'wave-list-refresh-signature)
+
 (defconst wave-list-buffer-name "*Wave List*")
 
 (defun wave-list-username-only (full-username)
@@ -126,11 +134,21 @@ Every wave takes up one line."
     (kill-line))
   (goto-char (point-min)))
 
+(defun wave-list-sign (wave-list-data)
+  "Sign the wavelets.  sha1 is available, but we can be cheaper."
+  (concat (int-to-string (length wave-list-data)) "."
+          (mapconcat (lambda (w) (plist-get w :digest)) wave-list-data ".")))
+
 (defun wave-list-refresh ()
   (interactive)
   (assert (eql major-mode 'wave-list-mode))
-  (let ((inhibit-read-only t))
-    (wave-list-render-wave-list (wave-get-inbox))))
+  (let* ((inhibit-read-only t)
+         (prev-point (point))
+         (inbox (wave-get-inbox))
+         (signature (wave-list-sign inbox)))
+    (unless (equal wave-list-refresh-signature signature)
+      (setq wave-list-refresh-signature signature)
+      (wave-list-render-wave-list inbox))))
 
 (define-derived-mode wave-list-mode nil "Wave List"
   "Mode for displaying a list of waves.
@@ -146,6 +164,8 @@ The wave client must be connected here.
         truncate-lines t
         selective-display t
         selective-display-ellipses t)
+  (setq wave-list-refresh-timer
+        (run-with-idle-timer 5 t 'wave-list-refresh))
   (hl-line-mode))
 
 (defun wave-list ()
