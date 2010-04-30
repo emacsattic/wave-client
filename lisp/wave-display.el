@@ -118,6 +118,11 @@
   "An alist that maps wavelet id strings to wavelet read states.")
 (make-variable-buffer-local 'wave-display-wave-read-state)
 
+(defvar wave-display-conversations
+  (make-hash-table :test 'equal)
+  "Hash table for conversations")
+(make-variable-buffer-local 'wave-display-conversations)
+
 (defvar wave-display-wavelets
   (make-hash-table :test 'equal)
   "Hash table of wavelet ids to wavelets.")

@@ -659,8 +659,6 @@ list of data pieces to post."
                                                 delta wavelet-name)
                                                'view-submit))))
 
-(defalias 'wave-client-send-delta 'wave-bc-send-delta)
-
 (defun wave-bc-get-inbox ()
   (wave-client-extract-waves (wave-client-get-waves)))
 

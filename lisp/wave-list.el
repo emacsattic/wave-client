@@ -88,9 +88,10 @@ If no @ symbol is found, return FULL-USERNAME unmodified."
   "Render WAVE-LIST, a list of wave summary alists to a buffer.
 
 Every wave takes up one line."
-  (setq wave-list-waves wave-list)
-  (erase-buffer)
-  (dolist (summary-alist wave-list)
+  (let ((inhibit-read-only t))
+    (setq wave-list-waves wave-list)
+    (erase-buffer)
+    (dolist (summary-alist wave-list)
     (let ((num-unread (plist-get summary-alist :unread)))
       (insert
        (let* ((unread-length 5)
@@ -102,7 +103,7 @@ Every wave takes up one line."
                   "s %-" (int-to-string digest-length)
                   "s %-" (int-to-string author-length)
                   "s\n")
-          (if (> num-unread 0) num-unread "")
+          (if (and num-unread (> num-unread 0)) num-unread "")
           (wave-list-str-truncate (plist-get summary-alist :digest)
                                   digest-length)
           (wave-list-str-truncate
@@ -119,12 +120,12 @@ Every wave takes up one line."
                                                  'wave-list-read-summary)))
         (add-text-properties (+ 1 pre-author) eol '(face wave-list-author))
         (add-text-properties bol eol (list 'summary (plist-get summary-alist :digest)))
-        (add-text-properties bol eol (list 'wave-id (plist-get summary-alist :id))))))
-  (goto-char (point-max))
-  (unless (eql (point) (point-min))
+        (add-text-properties bol eol (list 'wave-id (plist-get summary-alist :id)))))
+    (goto-char (point-max))
+    (unless (eql (point) (point-min))
     (backward-char)
-    (kill-line))
-  (goto-char (point-min)))
+    (kill-line)
+    (goto-char (point-min))))))
 
 (defun wave-list-refresh ()
   (interactive)
@@ -135,7 +136,8 @@ Every wave takes up one line."
           (lexical-let ((buf (current-buffer)))
             (wave-get-inbox (lambda (inbox)
                               (with-current-buffer buf
-                                (wave-list-render-wave-list inbox)))))))
+                                (wave-list-render-wave-list
+                                 (wave-client-ws-translate-inbox inbox))))))))
     (wave-list-render-wave-list inbox)
     (goto-char prev-point)))
 
