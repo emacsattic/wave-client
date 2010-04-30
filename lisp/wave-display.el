@@ -129,6 +129,14 @@
   place.")
 (make-variable-buffer-local 'wave-display-saved-window-configuration)
 
+(defvar wave-display-refresh-timer nil
+  "The idle timer for refresh.")
+(make-variable-buffer-local 'wave-display-refresh-timer)
+
+(defvar wave-display-signature nil
+  "Signature of all data, so we can tell when we need to refresh.")
+(make-variable-buffer-local 'wave-display-signature)
+
 (defstruct (wave-wavelet-read-state (:constructor wave-make-wavelet-read-state))
   (blips (make-hash-table))
   (raw nil)
@@ -641,13 +649,22 @@ Returns the new buffer."
           (car (wave-display-blip-wavelet-name blip)))
     (wave-edit-mode)))
 
+(defun wave-display-sign (wavelets)
+  "Sign the wavelets.  sha1 is available, but we can be cheaper."
+  (mapconcat (lambda (w) (int-to-string
+                     (car (wave-wavelet-version w)))) wavelets "."))
+
 (defun wave-display-refresh ()
   (interactive)
   (assert (eql major-mode 'wave-display-mode))
-  (let ((wavelets (wave-get-wave wave-display-wave-id))
-        (inhibit-read-only t))
-    (erase-buffer)
-    (let ((ewoc (ewoc-create 'wave-display-node-printer nil nil t)))
+  (let* ((wavelets (wave-get-wave wave-display-wave-id))
+         (data-signature (wave-display-sign wavelets))
+         (inhibit-read-only t)
+         (prev-point (point)))
+    (unless (equal wave-display-signature data-signature)
+      (setq wave-display-signature data-signature)
+      (erase-buffer)
+      (let ((ewoc (ewoc-create 'wave-display-node-printer nil nil t)))
       (setq wave-display-ewoc ewoc)
       (let ((conv-wavelets
              (remove-if-not
@@ -676,7 +693,8 @@ Returns the new buffer."
           (wave-display-add-conversation ewoc wavelet))
         ;; Finally, add all raw wavelets, for debugging.
         (dolist (wavelet wavelets)
-          (wave-display-add-raw-wavelet ewoc wavelet))))))
+          (wave-display-add-raw-wavelet ewoc wavelet))
+        (goto-char prev-point))))))
 
 (define-derived-mode wave-display-mode nil "Wave"
   "Mode for displaying a wave,
@@ -691,7 +709,9 @@ Returns the new buffer."
         ;;selective-display-ellipses t
         )
   (add-hook 'post-command-hook 'wave-display-highlight-blip t t)
-  (setq left-margin-width 1))
+  (setq left-margin-width 1)
+  (setq wave-display-refresh-timer
+        (run-with-idle-timer 1 t 'wave-display-refresh)))
 
 (provide 'wave-display)
 
