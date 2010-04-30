@@ -679,7 +679,8 @@ Returns the new buffer."
           (wave-display-add-raw-wavelet ewoc wavelet))))))
 
 (define-derived-mode wave-display-mode nil "Wave"
-  "Mode for displaying a wave,
+  "Mode for displaying a wave.
+
 \\{wave-mode-map}"
   :group 'wave-display
   (use-local-map wave-mode-map)
