@@ -138,46 +138,45 @@
   (wave-debug "Received update for wavelet %s version %d"
               (wave-wavelet-wavelet-name wavelet)
               (car (wave-wavelet-version wavelet)))
-  (assert (equal (car (wave-wavelet-version wavelet))
-                 (car (wave-delta-pre-version delta)))
-          t)
-  (loop
-   with timestamp = (wave-delta-timestamp delta)
-   with delta-author = (wave-delta-author delta)
-   for op across (wave-delta-ops delta)
-   for post-version from (1+ (car (wave-wavelet-version wavelet))) do
-   (etypecase op
-     (wave-add-participant
-      ;; The participant list is ordered, we have to add at the end.
-      (setf (wave-wavelet-participants wavelet)
-            (append (wave-wavelet-participants wavelet)
-                    (list (wave-add-participant-address op)))))
-     (wave-remove-participant
-      (setf (wave-wavelet-participants wavelet)
-            (remove (wave-remove-participant-address op)
-                    (wave-wavelet-participants wavelet))))
-     (wave-no-op
-      ;; do nothing
-      )
-     (wave-doc-op
-      (let* ((doc-id (wave-doc-op-doc-id op))
-             (doc (gethash doc-id (wave-wavelet-docs wavelet))))
-        (when (null doc)
-          (setq doc (wave-make-doc :doc-id doc-id))
-          (puthash doc-id doc (wave-wavelet-docs wavelet)))
-        ;; TODO(ohler): implement worthiness check
-        (setf (wave-doc-content doc) (wave-apply-doc-op
+  (when (equal (car (wave-wavelet-version wavelet))
+               (car (wave-delta-pre-version delta)))
+    (loop
+     with timestamp = (wave-delta-timestamp delta)
+     with delta-author = (wave-delta-author delta)
+     for op across (wave-delta-ops delta)
+     for post-version from (1+ (car (wave-wavelet-version wavelet))) do
+     (etypecase op
+       (wave-add-participant
+        ;; The participant list is ordered, we have to add at the end.
+        (setf (wave-wavelet-participants wavelet)
+              (append (wave-wavelet-participants wavelet)
+                      (list (wave-add-participant-address op)))))
+       (wave-remove-participant
+        (setf (wave-wavelet-participants wavelet)
+              (remove (wave-remove-participant-address op)
+                      (wave-wavelet-participants wavelet))))
+       (wave-no-op
+        ;; do nothing
+        )
+       (wave-doc-op
+        (let* ((doc-id (wave-doc-op-doc-id op))
+               (doc (gethash doc-id (wave-wavelet-docs wavelet))))
+          (when (null doc)
+            (setq doc (wave-make-doc :doc-id doc-id))
+            (puthash doc-id doc (wave-wavelet-docs wavelet)))
+          ;; TODO(ohler): implement worthiness check
+          (setf (wave-doc-content doc) (wave-apply-doc-op
                                         (wave-doc-content doc)
                                         (wave-doc-op-components op))
-              (wave-doc-contributors doc) (adjoin
+                (wave-doc-contributors doc) (adjoin
                                              delta-author
                                              (wave-doc-contributors doc))
-              (wave-doc-last-modified-version doc) post-version
-              (wave-doc-last-modified-time doc) timestamp))))
-   finally
-   (assert (eql (1- post-version) (car (wave-delta-post-version delta))) t))
-  (setf (wave-wavelet-version wavelet) (wave-delta-post-version delta)
-        (wave-wavelet-last-modified-time wavelet) (wave-delta-timestamp delta))
+                (wave-doc-last-modified-version doc) post-version
+                (wave-doc-last-modified-time doc) timestamp))))
+     finally
+     (assert (eql (1- post-version) (car (wave-delta-post-version delta))) t))
+    (setf (wave-wavelet-version wavelet) (wave-delta-post-version delta)
+          (wave-wavelet-last-modified-time wavelet) (wave-delta-timestamp delta)))
   wavelet)
 
 (defun wave-compact-element-from-verbose (element)
