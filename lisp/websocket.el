@@ -42,6 +42,7 @@
   (filter (assert nil) :read-only t)
   (close-callback (assert nil) :read-only t)
   (url (assert nil) :read-only t)
+  (inflight-packet nil)
   (v75 (assert nil) :read-only t))
 
 (defvar websocket-use-v75 nil
@@ -148,14 +149,28 @@ the connection is closed, then CLOSE-CALLBACK is called."
 
 (defun websocket-outer-filter (websocket output)
   "Removes connection strings, only passes packets."
-  (websocket-debug websocket "Receieved: %s" output)
-  (let ((packets (split-string output "[\0\377]" t)))
-    (when (websocket-first-response websocket)
-        ;; TODO(ahyatt) Better check the server response
-        (setf (websocket-first-response websocket) nil)
-        (setq packets (cdr packets)))
-    (dolist (p packets)
-      (funcall (websocket-filter websocket) p))))
+  (websocket-debug websocket "Received: %s" output)
+  (let ((start-point 0)
+        (end-point 0)
+        (text (websocket-inflight-packet websocket)))
+    (when (> (setq start-point (+ 1 (or (string-match "\0" output) -1))) 1)
+      (funcall (websocket-filter websocket)
+               (concat text
+                       (substring output 0 start-point)))
+      (setq text ""))
+    (while (setq end-point
+                 (string-match "\377" output start-point))
+      (funcall (websocket-filter websocket)
+               (concat text (substring output start-point end-point)))
+      (setq text "")
+      (setq start-point (+ 1 (or (string-match "\0" output end-point)
+                             (- (length output) 1)))))
+    (setf (websocket-inflight-packet websocket)
+          (concat text
+                  (substring output
+                             start-point
+                             (or (string-match "\377" output start-point)
+                                 (length output)))))))
 
 (defun websocket-send (websocket text)
   "Send the raw TEXT as a websocket packet."
