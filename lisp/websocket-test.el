@@ -32,7 +32,7 @@
 (defun websocket-test-get-filtered-response (outputs)
   (let ((packet-data nil)
         (websocket
-         (make-websocket :conn "fake-conn" :first-response nil
+         (make-websocket :conn "fake-conn"
                          :filter (lambda (packet) (push packet packet-data))
                          :close-callback (lambda (not-called) (assert nil))
                          :url "ws://foo/bar"
@@ -64,5 +64,16 @@
            (websocket-test-get-filtered-response
             '("\0foo\377\0ba" "r\377baz")))))
 
+(ert-deftest websocket-filter-first-response ()
+  (should (equal
+           '("foo" "bar")
+           (websocket-test-get-filtered-response
+            '("HTTP 1.1\0foo\377\0bar\377"))))
+  (should (equal
+           '("foo")
+           (websocket-test-get-filtered-response
+            '("HTTP 1.1" "\0foo\377")))))
+
 (ert-run-tests-interactively 'websocket-filter-basic)
 (ert-run-tests-interactively 'websocket-filter-inflight-packets)
+(ert-run-tests-interactively 'websocket-filter-first-response)

@@ -38,7 +38,6 @@
 ;;; Code:
 (defstruct websocket
   (conn (assert nil) :read-only t)
-  (first-response t :read-only nil)
   (filter (assert nil) :read-only t)
   (close-callback (assert nil) :read-only t)
   (url (assert nil) :read-only t)
@@ -152,25 +151,23 @@ the connection is closed, then CLOSE-CALLBACK is called."
   (websocket-debug websocket "Received: %s" output)
   (let ((start-point 0)
         (end-point 0)
-        (text (websocket-inflight-packet websocket)))
-    (when (> (setq start-point (+ 1 (or (string-match "\0" output) -1))) 1)
-      (funcall (websocket-filter websocket)
-               (concat text
-                       (substring output 0 start-point)))
-      (setq text ""))
-    (while (setq end-point
-                 (string-match "\377" output start-point))
-      (funcall (websocket-filter websocket)
-               (concat text (substring output start-point end-point)))
-      (setq text "")
-      (setq start-point (+ 1 (or (string-match "\0" output end-point)
-                             (- (length output) 1)))))
-    (setf (websocket-inflight-packet websocket)
-          (concat text
-                  (substring output
-                             start-point
-                             (or (string-match "\377" output start-point)
-                                 (length output)))))))
+        (text (concat (websocket-inflight-packet websocket) output)))
+    (setq start-point (string-match "\0" text))
+      (while (and start-point
+                  (setq end-point
+                        (string-match "\377" text start-point)))
+        (funcall (websocket-filter websocket)
+                 (substring text (+ 1 start-point) end-point))
+        (setq start-point (string-match "\0" text end-point)))
+      (let* ((next-start (or start-point
+                                     (when end-point
+                                       (or (string-match "\0" text end-point)
+                                           (- (length text) 1)))
+                                     0))
+             (next-end (or (string-match "\377" text next-start)
+                            (length text))))
+        (setf (websocket-inflight-packet websocket)
+              (concat (substring text next-start next-end))))))
 
 (defun websocket-send (websocket text)
   "Send the raw TEXT as a websocket packet."
