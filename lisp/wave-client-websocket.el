@@ -163,7 +163,7 @@ that the server sends on the channel.
 Returns the channel number."
   (let ((channel-number (incf wave-client-ws-channel-num)))
     (puthash channel-number callback wave-client-ws-channel-callbacks)
-    (wave-client-ws-send "waveserver.ProtocolOpenRequest" obj channel-number)
+    (wave-client-ws-send "ProtocolOpenRequest" obj channel-number)
     channel-number))
 
 (defun wave-client-ws-onclose ()
@@ -172,14 +172,15 @@ re-establish all the listeners needed to keep our buffers
 updated."
   ;; Reconnect.
   (wave-client-ws-connect wave-client-ws-url)
-  (maphash (lambda (wave-id callback)
-             (wave-ws-get-wave wave-id callback))
-           wave-client-ws-wave-callbacks))
+  (when wave-client-ws-wave-callbacks
+    (maphash (lambda (wave-id callback)
+               (wave-ws-get-wave wave-id callback))
+             wave-client-ws-wave-callbacks)))
 
 (defun wave-client-ws-submit (obj)
   "Submits OBJ to the server."
   (let ((channel-number (incf wave-client-ws-channel-num)))
-    (wave-client-ws-send "waveserver.ProtocolSubmitRequest"
+    (wave-client-ws-send "ProtocolSubmitRequest"
                          obj channel-number)))
 
 ;; Two possible formats:
@@ -210,26 +211,31 @@ updated."
         wavelet-name))))
 
 (defun wave-client-ws-parse-delta (raw-delta)
-  (destructuring-bind (&key operation author hashed_version) raw-delta
-    (destructuring-bind (&key history_hash version) hashed_version
-      (wave-make-delta :author author
-                       :pre-version (cons version history_hash)
-                       :post-version (cons (+ version (length operation)) 0)
-                       :timestamp 0
-                       :ops (map 'vector 'wave-client-ws-parse-op
-                                 operation)))))
+  ;; ProtocolWaveletDelta
+ (let* ((operation (plist-get raw-delta :3))
+        (author (plist-get raw-delta :2))
+        (hashed-version (plist-get raw-delta :1))
+        (history-hash (plist-get hashed-version :2))
+        (version (plist-get hashed-version :1)))
+   (wave-make-delta :author author
+                    :pre-version (cons version history-hash)
+                    :post-version (cons (+ version (length operation)) 0)
+                    :timestamp 0
+                    :ops (map 'vector 'wave-client-ws-parse-op
+                              operation))))
 
 (defun wave-client-ws-wavelet-callback (type response)
   (wave-debug "Received response %s" response)
   (ecase (intern-soft type)
-    (waveserver.ProtocolWaveletUpdate
+    (ProtocolWaveletUpdate
+     ;; Using ProtocolWaveletUpdate
      (let* ((wavelet-name (wave-client-ws-parse-wavelet-name
-                           (plist-get response :wavelet_name)))
+                           (plist-get response :1)))
             (wave-id (car wavelet-name))
             (wavelet-id (cdr wavelet-name))
-            (resulting-version (plist-get response :resulting_version))
+            (resulting-version (plist-get response :4))
             (deltas (map 'list #'wave-client-ws-parse-delta
-                         (plist-get response :applied_delta))))
+                         (plist-get response :2))))
        (assert deltas)
        (let ((wave (gethash wave-id wave-client-ws-wavelet-states)))
          (when (null wave)
@@ -249,8 +255,9 @@ updated."
              (wave-apply-delta wavelet delta))
            (setf (wave-wavelet-version wavelet)
                  (cons
-                  (plist-get resulting-version :version)
-                  (plist-get resulting-version :history_hash)))
+                  ;; ProtocolHashedVersion
+                  (plist-get resulting-version :1)
+                  (plist-get resulting-version :2)))
            (let ((callback (gethash wave-id wave-client-ws-wave-callbacks)))
              (when callback
                (wave-debug "Sending callback for %s at time %f"
@@ -263,10 +270,11 @@ updated."
 (defconst wave-client-ws-indexwave-wave-id "indexwave!indexwave")
 
 (defun wave-client-ws-open-wave-channel (wave-id)
-  (wave-client-ws-open `(:participant_id ,(concat wave-client-user
-                                                  "@" (wave-client-domain))
-                                         :wave_id ,wave-id
-                                         :wavelet_id_prefix "")
+  ;; ProtocolOpenRequest
+  (wave-client-ws-open `(:1 ,(concat wave-client-user
+                                     "@" (wave-client-domain))
+                            :2 ,wave-id
+                            :3 (""))
                        'wave-client-ws-wavelet-callback))
 
 (defun wave-client-ws-ensure-wave-channel-open (wave-id)
@@ -276,19 +284,49 @@ updated."
         (puthash wave-id channel wave-client-ws-wave-channels)
         channel)))
 
+(defun wave-client-ws-parse-component (raw-component)
+  (destructuring-bind (type arg) raw-component
+    (ecase type
+      ;; TODO(ahyatt) There's no reason not to use structs here,
+      ;; we just need to modify this and wave-apply-doc-op.
+
+      ;; ProtocolDocumentOperation.Component
+      (:1 (list :annotation_boundary arg))
+      (:2 (list :characters arg))
+      (:3 (list :element_start
+                (list :type (plist-get arg :1)
+                      :attribute
+                      (apply 'vector
+                             (mapcar (lambda (kv-pair)
+                                       (list
+                                        :key (plist-get kv-pair :1)
+                                        :value (plist-get kv-pair :2)))
+                                     (plist-get arg :2))))))
+      (:4 '(:element_end t))
+      (:5 (list :retain_item_count arg))
+      (:6 (list :delete_characters arg))
+      (:7 (list :delete_element_start arg))  ;; unimplemented
+      (:8 (list :delete_element_end t))      ;; unimplemented
+      (:9 (list :replace_attributes arg))    ;; unimplemented
+      (:10 (list :update_attributes arg))))) ;; unimplemented
+
 (defun wave-client-ws-parse-op (raw-op)
   (destructuring-bind (type arg) raw-op
     (ecase type
-      (:mutate_document
-       (destructuring-bind (&key document_id document_operation) arg
-         (destructuring-bind (&key component) document_operation
-           (wave-make-doc-op :doc-id (intern document_id)
-                             :components component))))
-      (:add_participant
+      ;; ProtocolWaveletOperation
+      (:3
+       ;; ProtocolWaveletOperation.MutateDocument
+       ;; ProtocolDocumentOperation
+       (wave-make-doc-op :doc-id (intern (plist-get arg :1))
+                         :components
+                         (apply 'vector
+                                (mapcar #'wave-client-ws-parse-component
+                                        (plist-get (plist-get arg :2) :1)))))
+      (:1
        (wave-make-add-participant :address arg))
-      (:remove_participant
+      (:2
        (wave-make-remove-participant :address arg))
-      (:no_op
+      (:4
        (assert (eql arg t) t)
        (wave-make-no-op)))))
 
@@ -310,45 +348,50 @@ updated."
     (sort* plists #'string< :key (lambda (plist) (plist-get plist :id)))))
 
 (defun wave-ws-component-to-obj (component)
+  ;; using ProtocolDocumentOperation
   (etypecase
    component
    (wave-text
-    (list :characters (wave-client-ws-cntrl-fixup
+    (list :2 (wave-client-ws-cntrl-fixup
                        (wave-text-text component))))
    (wave-element-start
-    (list :element_start
-          (append (list :type (wave-element-start-type component))
+    (list :3
+          ;; ElementStart
+          (append (list :1 (wave-element-start-type component))
                   (when (wave-element-start-attributes component)
-                    (list :attribute
+                    (list :2
                           (apply
                            'vector
                            (mapcar (lambda (p)
-                                     (list :key (wave-key-value-pair-key p)
-                                           :value (wave-key-value-pair-value p)))
+                                     ;; KeyValuePair
+                                     (list :1 (wave-key-value-pair-key p)
+                                           :2 (wave-key-value-pair-value p)))
                                    (wave-element-start-attributes component))))))))
    (wave-element-end
-    (list :element_end t))
+    (list :4 t))
    (wave-retain-item-count
-    (list :retain_item_count (wave-retain-item-count-num component)))))
+    (list :5 (wave-retain-item-count-num component)))))
 
 (defun wave-ws-op-to-obj (op)
+  ;; using ProtocolWaveletOperation
   (etypecase
    op
    (wave-add-participant
-    (list :add_participant
-                  (wave-add-participant-address op)))
+    (list :1
+          (wave-add-participant-address op)))
    (wave-remove-participant
-    (list :remove_participant
+    (list :2
           (wave-remove-participant-address op)))
    (wave-blip-submit
-    (list :mutate_document
-          (list :document_id (wave-blip-submit-blip-id op)
-                :document_operation '())))
+    (list :3
+          ;; ProtocolWaveletOperation.MutateDocument
+          (list :1 (wave-blip-submit-blip-id op)
+                :2 '())))
    (wave-doc-op
-    (list :mutate_document
-           (list :document_id (wave-doc-op-doc-id op)
-                 :document_operation
-                 (list :component
+    (list :3
+           (list :1 (wave-doc-op-doc-id op)
+                 :2
+                 (list :1
                        (apply 'vector
                               (mapcar (lambda (c)
                                         (wave-ws-component-to-obj c))
@@ -363,17 +406,20 @@ updated."
            (cdr wavelet-name))))
 
 (defun wave-ws-delta-to-obj (delta wavelet-name)
-  (list :wavelet_name (wave-ws-wavelet-name-to-url wavelet-name)
-        :delta
-        (list :hashed_version
-              (list :version (car (wave-delta-pre-version delta))
-                    :history_hash (wave-client-ws-cntrl-fixup
-                                   (cdr (wave-delta-pre-version delta))))
-              :author (wave-delta-author delta)
-              :operation (apply 'vector
-                                (mapcar (lambda (op)
-                                          (wave-ws-op-to-obj op))
-                                        (wave-delta-ops delta))))))
+  ;; ProtocolSubmitRequest
+  (list :1 (wave-ws-wavelet-name-to-url wavelet-name)
+        :2
+        ;; ProtocolWaveletDelta
+        (list :1
+              ;; ProtocolHashedVersion
+              (list :1 (car (wave-delta-pre-version delta))
+                    :2 (wave-client-ws-cntrl-fixup
+                        (cdr (wave-delta-pre-version delta))))
+              :2 (wave-delta-author delta)
+              :3 (apply 'vector
+                        (mapcar (lambda (op)
+                                  (wave-ws-op-to-obj op))
+                                (wave-delta-ops delta))))))
 
 (defun wave-ws-return-wave (wave-id)
   (let ((wave (gethash wave-id wave-client-ws-wavelet-states)))
