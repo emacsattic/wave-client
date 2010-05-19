@@ -170,7 +170,8 @@
                                         (wave-doc-op-components op))
                 (wave-doc-contributors doc) (adjoin
                                              delta-author
-                                             (wave-doc-contributors doc))
+                                             (wave-doc-contributors doc)
+                                             :test 'equal)
                 (wave-doc-last-modified-version doc) post-version
                 (wave-doc-last-modified-time doc) timestamp))))
      finally
