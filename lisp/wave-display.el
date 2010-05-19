@@ -123,8 +123,15 @@
   "Hash table for conversations")
 (make-variable-buffer-local 'wave-display-conversations)
 
+;; With federation, it's hard to predict the prefix of things, so we
+;; need to do suffix-only testing for our hash table.
+(define-hash-table-test 'wave-suffix-equal
+  (lambda (a b)
+    (equal (wave-id-suffix a) (wave-id-suffix b)))
+  (lambda (item) (sxhash (wave-id-suffix item))))
+
 (defvar wave-display-wavelets
-  (make-hash-table :test 'equal)
+  (make-hash-table :test 'wave-suffix-equal)
   "Hash table of wavelet ids to wavelets.")
 (make-variable-buffer-local 'wave-display-wavelets)
 
@@ -208,17 +215,16 @@
 
 (defun wave-display-user-data-wavelet ()
   "Return the user data wavelet."
-  (concat (wave-client-domain)
-          "!user+" (wave-client-email-address)))
+  (concat "user+" (wave-client-email-address)))
 
 (defun wave-display-maybe-mark-unread (blip-node)
   "If a blip is unread, mark it read."
   (let ((blip (ewoc-data blip-node)))
     (when (wave-display-blip-unreadp blip)
-      (let* ((user-wavelet-id (wave-display-user-data-wavelet))
-             (conv-wavelet-id (concat (wave-client-domain) "!conv+root"))
-             (user-header (gethash user-wavelet-id wave-display-wavelets))
-             (conv-header (gethash conv-wavelet-id wave-display-wavelets)))
+      (let* ((user-wavelet-suffix (wave-display-user-data-wavelet))
+             (conv-wavelet-suffix "conv+root")
+             (user-header (gethash user-wavelet-suffix wave-display-wavelets))
+             (conv-header (gethash conv-wavelet-suffix wave-display-wavelets)))
         (unless user-header (error "Could not find user header!"))
         (unless conv-header (error "Could not find conv header!"))
         (wave-update-mark-blip-read

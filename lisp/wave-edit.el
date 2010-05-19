@@ -109,15 +109,14 @@ If we are in draft mode, though, do nothing."
                                      old-endpos new-endpos)))))))
 
 (defun wave-edit-get-conv-wavelet-name ()
-  (cons wave-edit-wavelet-id
-        (concat (wave-client-domain) "!conv+root")))
+  (with-current-buffer wave-edit-parent-buf
+    (wave-display-header-wavelet-name
+     (gethash "conv+root" wave-display-wavelets))))
 
 (defun wave-edit-get-wavelet-version ()
-  (let ((conv-wavelet-name (wave-edit-get-conv-wavelet-name)))
-    (wave-display-header-version
+  (wave-display-header-version
      (with-current-buffer wave-edit-parent-buf
-       (gethash (cdr conv-wavelet-name)
-                wave-display-wavelets)))))
+       (gethash "conv+root" wave-display-wavelets))))
 
 (defun wave-edit-blip ()
   (let* ((blip-id (intern wave-edit-blip-id)))

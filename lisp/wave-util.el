@@ -73,6 +73,11 @@ counted separately.  This should be idempotent."
                (setq expanded (cons e expanded))))))
     (nreverse expanded)))
 
+(defun wave-id-suffix (wave-id)
+  "Return the part after the ! in WAVE-ID.
+For example, example.com!conv+root becomes conv+root."
+  (substring wave-id (+ 1 (or (string-match "!" wave-id) -1))))
+
 (defmacro defproto (name &rest struct-elems)
   "Replacement for defstruct, allows for proto field number
   mappings"
