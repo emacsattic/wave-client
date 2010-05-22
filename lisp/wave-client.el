@@ -38,7 +38,9 @@
 ;; for this or any other client.
 
 (eval-and-compile
-  (require 'cl))
+  (require 'cl)
+  (require 'wave-client-websocket)
+  (require 'wave-client-browser-channel))
 
 (defgroup wave-client nil
   "Wave client for emacs.")

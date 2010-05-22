@@ -1,14 +1,13 @@
 Using
 -----
 
-This branch of the wave-client-for-emacs project uses a direct
-connection to the same backend that the http://wave.google.com UI
-uses.  Because of this, we have access to all the wave instances,
-without having to wait for a client/server protocol or real
-federation.
+The wave-client-for-emacs supports two kinds of backends right now:
+the Wave server backend, using an undocumented protocol, and the
+FedOne backend, using the official client/server protocol.
 
 Both the UI and the backend are a work in progress.  Expect this to be
-read-only for the near future.
+read-only for the near future.  The FedOne backend is starting to
+support some editing.
 
 To start using, set your load-path to point to this lisp directory for
 this project, and require the wave-list, which is the entry point for
@@ -16,6 +15,13 @@ viewing waves.
 
 (add-to-list 'load-path "~/src/wave-client-for-emacs/lisp")
 (require 'wave-list)
+
+Then, if you want to connect to the Wave server backend:
+(setq wave-client-connection-method 'browser-channel)
+
+If you want to connect to the FedOne client:
+(setq wave-client-connection-method 'websocket)
+(setq wave-client-ws-url "ws://my.fedone.server:9898/socket")
 
 Then configure your username:
 
@@ -30,18 +36,18 @@ To connect to a specific domain, such as sandbox, add this line as well:
 
 (setq wave-client-domain "wavesandbox.com")
 
-WARNING: This project currently utilizes the unpublished client/server
-protocol that wave.google.com's javascript uses to communicate with
-the wave servers. This is not a stable protocol supported by
-Google. This protocol is the Google Wave team's internal protocol and
-is under active development, so it may change at any time without
-regards for this or any other client.
+WARNING: The Wave server backend (using the browser channel) currently
+utilizes the unpublished client/server protocol that wave.google.com's
+javascript uses to communicate with the wave servers. This is not a
+stable protocol supported by Google. This protocol is the Google Wave
+team's internal protocol and is under active development, so it may
+change at any time without regards for this or any other client.
 
 
-Known issues
-------------
+Known issues (read-only functionality)
+--------------------------------------
 
-Deleted blips are shown.
+Waves are not shown in the list in the correct order.
 
-Blips are not shown in the same order as in the UI.
-
+For the FedOne client, wave titles are not correct, and are
+incorrectly inclosed in parenthesis.
