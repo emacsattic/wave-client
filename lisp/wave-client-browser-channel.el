@@ -38,9 +38,9 @@
   (require 'cl)
   (require 'json)
   (require 'url)
+  (require 'tls)
   (require 'wave-util)
   (require 'wave-data))
-
 
 (defcustom wave-client-server
   "https://wave.google.com"
@@ -51,6 +51,10 @@
 (defconst wave-client-process-buf-name
   "*wave client*"
   "The buffer of the curl process")
+
+(defconst wave-client-get-buf-name
+  "*wave client GET*"
+  "The buffer of the Wave hanging GET." )
 
 (defconst wave-client-task-type
   '((echo . 0) (view-submit . 1100))
@@ -85,6 +89,9 @@ incremented for every request.")
 (defvar wave-client-request-num 0
   "The request number, which monotonically increases.")
 
+(defvar wave-client-bc-get-conn nil
+  "The connection for the browser channel GET process.")
+
 (defvar wave-client-last-array-id 0
   "Last seen array number")
 
@@ -106,6 +113,11 @@ incremented for every request.")
                wave-client-session)
     (error "Wave client not running")))
 
+(defun wave-client-path-prefix ()
+  (if wave-client-domain
+              (concat "/a/" wave-client-domain)
+    "/wave"))
+
 (defun wave-client-get-url (&optional path)
   "Returns a proper URL given a PATH, which must start with a /
 to the end, if given.  Uses `wave-client-domain'."
@@ -113,12 +125,11 @@ to the end, if given.  Uses `wave-client-domain'."
     (error "wave-client-domain empty, should probably be nil"))
   (format "%s%s%s"
           wave-client-server
-          (if wave-client-domain
-              (concat "/a/" wave-client-domain)
-            "/wave")
+          (wave-client-path-prefix)
           (or path "/")))
 
 (defun wave-client-reset-browser-channel ()
+  (wave-debug "Resetting browser channel")
   (setq wave-client-gsession nil
         wave-client-sid nil
         wave-client-rid nil
@@ -206,28 +217,28 @@ buffer with the result."
          (signal (caadr status) (cdadr status))))
   (wave-debug "accept, buffer-string: %s" (buffer-string))
   ;; If the gsession is no longer current, do not accept anything.
-  (while (and (equal wave-client-gsession gsession)
-              (re-search-forward "^[[:digit:]]+$" nil t))
-    (let* ((len (string-to-number (match-string 0)))
-           (end (+ (point) len))
-           (json (json-read-from-string (buffer-substring (point) end)))
-           (last (aref json (- (length json) 1))))
-      (setq wave-client-last-array-id (aref last 0))
-      (setq wave-client-queue
-            (append wave-client-queue
-                    (remove-if-not (lambda (e) (equal (aref (cdr e) 0) "wfe"))
-                                   (mapcar (lambda (elem)
-                                             (cons (aref elem 0)
-                                                   (if (stringp (aref elem 1))
-                                                       (json-read-from-string
-                                                        (aref elem 1))
-                                                     (aref elem 1)))) json))))
-      ;; We need to restart the browser channel if it stops
-      (when (and (vectorp (aref last 1)) (equal (aref (aref last 1) 0) "stop"))
-        (wave-debug "Browser channel stopped, re-opening after a minute.")
-        (wave-client-reset-browser-channel)
-        ;; After a minute, try again
-        (run-at-time "5 sec" nil 'wave-client-get-browser-channel)))))
+  (if (not (equal wave-client-gsession gsession))
+      (wave-debug "gsessions don't match.  This must be a leftover.")
+      (while (re-search-forward "^[[:digit:]]+$" nil t)
+        (let* ((len (string-to-number (match-string 0)))
+               (end (+ (point) len 1))
+               (json (json-read-from-string (buffer-substring (+ 1 (point)) end)))
+               (last (aref json (- (length json) 1))))
+          (setq wave-client-last-array-id (aref last 0))
+          (wave-debug "setting aref to %d" wave-client-last-array-id)
+          (setq wave-client-queue
+                (append wave-client-queue
+                        (remove-if-not (lambda (e) (equal (aref (cdr e) 0) "wfe"))
+                                       (mapcar (lambda (elem)
+                                                 (cons (aref elem 0)
+                                                       (if (stringp (aref elem 1))
+                                                           (json-read-from-string
+                                                            (aref elem 1))
+                                                         (aref elem 1)))) json))))
+          ;; We need to kill the browser channel if it stops
+          (when (and (vectorp (aref last 1)) (equal (aref (aref last 1) 0) "stop"))
+            (wave-debug "Browser channel stopped, re-opening after 5 secs.")
+            (wave-client-reset-browser-channel))))))
 
 (defun wave-client-curl (url data cookies &optional post)
   "Execute curl with a given URL and cookie DATA, return the
@@ -520,6 +531,7 @@ before it is incremented."
 (defun wave-client-post-to-browser-channel (data)
   "Post not-yet-jsonified DATA to a browser-channel.  DATA is a
 list of data pieces to post."
+  (wave-client-assert-connected)
   (wave-debug "Posting to browser channel: %s" data)
   (let* ((sid (wave-client-get-channel-sid))
          (url (concat "/wfe/channel?gsessionid=" wave-client-gsession
@@ -540,7 +552,8 @@ list of data pieces to post."
                                              (json-encode-list d))))
                                        (incf i)
                                        retval)) data)) t)
-      (wave-client-kill-current-process-buffer))))
+      (wave-client-kill-current-process-buffer))
+    (wave-client-get-browser-channel)))
 
 (defun wave-client-wrap-browser-channel-req (data type)
   "Return an json object wrapping the data for posting to a
@@ -559,17 +572,43 @@ list of data pieces to post."
 (defun wave-client-get-browser-channel ()
   "Get the response from the latest browser-channel"
   (let* ((sid (wave-client-get-channel-sid))
-         (url-suffix (concat "/wfe/channel?gsessionid=" wave-client-gsession
-                             "&VER=8&SID=" sid "&AID="
-                             (int-to-string wave-client-last-array-id)
-                             "&RID=rpc&CI=1&TYPE=xmlhttp&t=1")))
-    (wave-client-fetch (wave-client-get-url url-suffix) nil)))
+         (url-struct (url-generic-parse-url wave-client-server))
+         (path (concat (wave-client-path-prefix)
+                       "/wfe/channel?gsessionid="
+                                   wave-client-gsession
+                                   "&VER=8&SID=" sid "&AID="
+                                   (int-to-string wave-client-last-array-id)
+                                   "&RID=rpc&CI=0&TYPE=xmlhttp&t=")))
+    (setq wave-client-bc-get-conn
+          (open-tls-stream "Wave Client" wave-client-get-buf-name
+                           (url-host url-struct)
+                           (url-port url-struct)))
+    (process-send-string wave-client-bc-get-conn
+                         (format "GET %s HTTP/1.1\r\n" path))
+    (process-send-string wave-client-bc-get-conn
+                         (format "Host: %s\r\nCookie: WAVE=%s\r\n\r\n"
+                                 (url-host url-struct)
+                                 wave-client-auth-cookie))
+    (lexical-let ((cur-gsession wave-client-gsession))
+      (set-process-filter wave-client-bc-get-conn
+                          (lambda (process output)
+                            (with-temp-buffer
+                              (insert output)
+                              (goto-char (point-min))
+                              (wave-client-accept nil cur-gsession)))))))
 
-(defun wave-client-browser-channel-echo-test (test-id)
+(defun wave-client-browser-channel-send-echo (test-id)
   "Test whether we can post to a browser channel once and get a
   reply.  TEST-ID is anything unique to echo."
   (let ((req (wave-client-wrap-browser-channel-req `(:1 ,test-id) 'echo)))
       (wave-client-post-to-browser-channel (list req))))
+
+(defun wave-client-browser-channel-echo-test ()
+  (wave-client-reset-browser-channel)
+  (wave-client-browser-channel-send-echo "ABC")
+  (wave-client-get-browser-channel)
+  (wave-client-browser-channel-send-echo "DEF")
+  wave-client-queue)
 
 (defun wave-bc-add-participant-to-proto (op)
   (wave-op-proto
