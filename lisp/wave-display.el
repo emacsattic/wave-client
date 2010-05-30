@@ -233,7 +233,8 @@
          conv-header
          (wave-wavelet-read-state-raw
           (cdr (assoc (cdr (wave-display-header-wavelet-name conv-header))
-                      wave-display-wave-read-state))))))))
+                      wave-display-wave-read-state)))))
+      (wave-display-refresh))))
 
 (defun wave-display-wavelet-name-at-point ()
   (let ((node (ewoc-data (ewoc-locate wave-display-ewoc))))
