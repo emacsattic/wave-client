@@ -130,6 +130,9 @@ to the end, if given.  Uses `wave-client-domain'."
 
 (defun wave-client-reset-browser-channel ()
   (wave-debug "Resetting browser channel")
+  (let ((conn-buf (process-buffer wave-client-bc-get-conn)))
+    (delete-proces wave-client-bc-get-conn)
+    (kill-buffer conn-buf))
   (setq wave-client-gsession nil
         wave-client-sid nil
         wave-client-rid nil

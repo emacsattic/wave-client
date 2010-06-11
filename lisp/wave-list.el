@@ -32,6 +32,7 @@
 
 (require 'wave-client)
 (require 'wave-display)
+(require 'ewoc)
 
 ;;; Code:
 (defface wave-list-author
