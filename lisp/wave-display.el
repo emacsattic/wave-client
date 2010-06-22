@@ -322,6 +322,44 @@
                         'wave-wavelet-participants)
     (insert "\n\n")))
 
+(defun wave-display-rgb-to-color (rgb-string)
+  "Convert RGB-STRING to an emacs color."
+  (if (string-match "rgb(\\(\\w+\\), \\(\\w+\\), \\(\\w+\\))" rgb-string)
+   (let ((red (* (string-to-number (match-string 1 rgb-string))
+                 255))
+         (green (* (string-to-number (match-string 2 rgb-string)) 255))
+         (blue (* (string-to-number (match-string 3 rgb-string)) 255)))
+     (car (tty-color-approximate (list red green blue))))
+   "white"))
+
+(defun wave-display-handle-boundary (start end key val)
+  "Handle a particular boundary from points START to END."
+  (cond
+   ((equal key "lang")) ;;nothing to do
+   ((equal key "conv/title")
+    (add-text-properties begin end
+                         '(face wave-title)))
+   ((or (member key '("style/fontWeight" "style/textDecoration"
+                      "style/fontStyle")))
+    (add-text-properties begin end
+                         (list 'face (list (intern val)))))
+   ((equal key "style/color")
+    (add-text-properties begin end
+                         `(face (:foreground
+                                 ,(wave-display-rgb-to-color val)))))
+   ((or (member key '("link/auto"
+                      "link/manual"
+                      "link/wave"
+                      "spell"
+                      "style/fontFamily"))
+        (string-match "^user/d/" key)
+        (string-match "^user/e/" key))
+    ;; TODO: Implement these
+    )
+   (t (wave-debug
+       "Don't know how to handle end-boundary of type %s"
+       key))))
+
 (defun wave-display-blip (node)
   (let* ((blip (wave-display-blip-raw-blip node))
          (blip-id (wave-doc-doc-id blip))
@@ -371,32 +409,16 @@
                          (cons (plist-get change :key)
                                (cons change (point)))))))
                    (end
-                    (loop for key across (cadr boundary) do
-                          (cond
-                           ((equal key "lang")) ;;nothing to do
-                           ((equal key "conv/title")
-                            (add-text-properties
-                             (cddr (assoc key boundaries))
-                             (point)
-                             '(face wave-title)))
-                           ((or (member key '("link/auto"
-                                              "link/manual"
-                                              "link/wave"
-                                              "style/color"
-                                              "spell"
-                                              "style/fontFamily"
-                                              "style/fontWeight"
-                                              "style/fontStyle"))
-                                (string-match "^user/d/" key)
-                                (string-match "^user/e/" key))
-                            ;; TODO: Implement these
-                            )
-                           (t (wave-debug
-                               "Don't know how to handle end-boundary of type %s"
-                               key))))))))
+                    (loop for key across (cadr boundary)
+                          for bounds = (cdr (assoc key boundaries))
+                          for begin = (cdr bounds)
+                          for val = (plist-get (car bounds) :newvalue)
+                          do
+                          (wave-display-handle-boundary begin (point)
+                                                        key val))))))
               ((listp op)
                (push (cons op (point)) op-stack))
-              (t (message "Don't know how to deal with op: %s" op)))))
+:              (t (message "Don't know how to deal with op: %s" op)))))
     (insert "\n")))
 
 (defun wave-display-raw-doc (node)
