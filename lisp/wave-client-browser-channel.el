@@ -48,6 +48,12 @@
   :type 'string
   :group 'wave-client)
 
+(defcustom wave-client-attachment-server
+  "https://wave.googleusercontent.com"
+  "The attachment server url, without any trailing backslash"
+  :type 'string
+  :group 'wave-client)
+
 (defconst wave-client-process-buf-name
   "*wave client*"
   "The buffer of the curl process")
@@ -131,7 +137,7 @@ to the end, if given.  Uses `wave-client-domain'."
 (defun wave-client-reset-browser-channel ()
   (wave-debug "Resetting browser channel")
   (let ((conn-buf (process-buffer wave-client-bc-get-conn)))
-    (delete-proces wave-client-bc-get-conn)
+    (delete-process wave-client-bc-get-conn)
     (kill-buffer conn-buf))
   (setq wave-client-gsession nil
         wave-client-sid nil
@@ -159,7 +165,7 @@ that is a direct conversion from the JSON."
            (plist-get (plist-get wave-client-session :userProfile)
                       :id))))
 
-(defun wave-client-get-auth-cookie ()
+(defun wave-client-get-new-auth-cookie ()
   "Return the auth cookie for this user."
   (unless wave-client-user
     (error (concat "You need to at least set `wave-client-user' "
@@ -248,29 +254,31 @@ buffer with the result."
 buffer with the result."
   (wave-debug "Sending %s request to url %s, with data %s"
               (if post "POST" "GET") url data)
-  (let* ((buf (generate-new-buffer wave-client-process-buf-name))
-         (retval
-          (apply 'call-process "curl" nil buf nil
-                 (nconc (list url "-f" "-s")
-                        (unless post (list "-G"))
-                        (mapcan (lambda (c)
-                                  (list "-d"
-                                        (concat
-                                         (url-hexify-string (car c))
-                                         "="
-                                         (url-hexify-string (cdr c)))))
-                                data)
-                        (list
-                         "-b"
-                         (mapconcat
-                          (lambda (c)
-                            (concat
-                             (url-hexify-string (car c))
-                             "="
-                             (url-hexify-string (cdr c))))
-                          cookies "; "))))))
-    (when (= retval 22)
-      (error "HTTP error loading page %s" url))
+  (let* ((buf (generate-new-buffer wave-client-process-buf-name)))
+    (with-current-buffer buf
+      (set-buffer-multibyte nil))
+    (let ((retval
+           (apply 'call-process "curl" nil buf nil
+                  (nconc (list url "-f" "-s")
+                         (unless post (list "-G"))
+                         (mapcan (lambda (c)
+                                   (list "-d"
+                                         (concat
+                                          (url-hexify-string (car c))
+                                          "="
+                                          (url-hexify-string (cdr c)))))
+                                 data)
+                         (list
+                          "-b"
+                          (mapconcat
+                           (lambda (c)
+                             (concat
+                              (url-hexify-string (car c))
+                              "="
+                              (url-hexify-string (cdr c))))
+                           cookies "; "))))))
+      (when (= retval 22)
+        (error "HTTP error loading page %s" url)))
     buf))
 
 (defun wave-client-json-read (text &optional do-extra-munging object-type)
@@ -294,26 +302,27 @@ buffer with the result."
 		"\\1\"\\2\":" double-quoted-text) double-quoted-text))
        text))))
 
+(defun wave-client-auth-cookies ()
+  (unless wave-client-auth-cookie
+    (setq wave-client-auth-cookie (wave-client-get-new-auth-cookie)))
+  `(("WAVE" . ,wave-client-auth-cookie)))
+
 (defun wave-client-get-waves ()
   "Get a list of waves.  Also has the side effect of populating
 the `wave-client-session' variable."
-  (let ((auth-cookie (or wave-client-auth-cookie
-                         (let ((cookie (wave-client-get-auth-cookie)))
-                           (setq wave-client-auth-cookie cookie)
-                           cookie))))
-    (save-excursion
-      (unwind-protect
-          (progn
-            (set-buffer (wave-client-curl (wave-client-get-url)
-                                          '()
-                                          `(("WAVE" . ,auth-cookie))))
-            (goto-char (point-min))
-            (search-forward-regexp "__session = \\({.*}\\);var")
-            (setq wave-client-session (wave-client-json-read
-                                       (match-string 1) t))
-            (search-forward-regexp "json = \\({\"r\":\"^d1\".*}\\);")
-            (wave-client-json-read (match-string 1) t))
-        (wave-client-kill-current-process-buffer)))))
+  (save-excursion
+    (unwind-protect
+        (progn
+          (set-buffer (wave-client-curl (wave-client-get-url)
+                                        '()
+                                        (wave-client-auth-cookies)))
+          (goto-char (point-min))
+          (search-forward-regexp "__session = \\({.*}\\);var")
+          (setq wave-client-session (wave-client-json-read
+                                     (match-string 1) t))
+          (search-forward-regexp "json = \\({\"r\":\"^d1\".*}\\);")
+          (wave-client-json-read (match-string 1) t))
+      (wave-client-kill-current-process-buffer))))
 
 (defun wave-client-extract-waves (wave-plist)
   "Extract information from the raw WAVE-PLIST, transforming it
@@ -422,7 +431,7 @@ is defined, we will do a POST with the data."
             (wave-client-get-url url-suffix)
             ;; we need something to trigger a curl post
             data
-            `(("WAVE" . ,wave-client-auth-cookie))
+            (wave-client-auth-cookies)
             (not (null data))))
           (goto-char (point-min))
           (if (re-search-forward "{\\|\\[" nil noerror)
@@ -625,7 +634,7 @@ list of data pieces to post."
    :type-id (wave-bc-message-type 'remove-participant)
    :remove-participant
    (wave-remove-participant-proto :user-id
-                                  (wave-add-participant-addess op))))
+                                  (wave-add-participant-address op))))
 
 (defun wave-bc-blip-submit-to-proto (op)
   (wave-op-proto

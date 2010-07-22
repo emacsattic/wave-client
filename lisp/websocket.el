@@ -103,7 +103,7 @@ the connection is closed, then CLOSE-CALLBACK is called."
                                          :host (url-host url-struct)
                                          :service (url-port url-struct)
                                          :nowait nil)
-                 (if (equal (url-type url-struct "wss"))
+                 (if (equal (url-type url-struct) "wss")
                      (error "Not implemented yet")
                    (error "Unknown protocol"))))
          (websocket (make-websocket :conn conn :url url :filter filter

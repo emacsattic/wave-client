@@ -68,7 +68,7 @@
   "Face used for unread markers."
   :group 'wave-display)
 
-(defvar wave-display-buffer-format "*Wave %s*"
+(defvar wave-display-buffer-format "*Wave: %s*"
   "The format argument, which must have one %s, for a Wave's
   buffer name.")
 
@@ -80,10 +80,6 @@
 
 (defconst wave-blip-buffer-name
   "*Wave Message*")
-
-(defvar wave-display-buffer-format "*Wave %s*"
-  "The format argument, which must have one %s, for a Wave's
-  buffer name.")
 
 (defvar wave-mode-map
   (let ((map (make-sparse-keymap)))
@@ -118,6 +114,9 @@
   "An alist that maps wavelet id strings to wavelet read states.")
 (make-variable-buffer-local 'wave-display-wave-read-state)
 
+;; TODO(ohler): The default values for these should be nil, and we
+;; should create a new hash table for every buffer.  Aren't we mixing
+;; data from different waves otherwise?
 (defvar wave-display-conversations
   (make-hash-table :test 'equal)
   "Hash table for conversations")
@@ -132,8 +131,11 @@
 
 (defvar wave-display-wavelets
   (make-hash-table :test 'wave-suffix-equal)
-  "Hash table of wavelet ids to wavelets.")
+  "Hash table of wavelet ids to objects of type `wave-display-header'.")
 (make-variable-buffer-local 'wave-display-wavelets)
+
+(defvar wave-display-attachments nil
+  "Hash table of pairs of wavelet id & attachment id to objects of type `wave-attachment-info'.")
 
 (defvar wave-display-saved-window-configuration
   nil
@@ -332,8 +334,8 @@
      (car (tty-color-approximate (list red green blue))))
    "white"))
 
-(defun wave-display-handle-boundary (start end key val)
-  "Handle a particular boundary from points START to END."
+(defun wave-display-handle-boundary (begin end key val)
+  "Handle a particular boundary from points BEGIN to END."
   (cond
    ((equal key "lang")) ;;nothing to do
    ((equal key "conv/title")
@@ -363,7 +365,8 @@
 (defun wave-display-blip (node)
   (let* ((blip (wave-display-blip-raw-blip node))
          (blip-id (wave-doc-doc-id blip))
-         (level (wave-display-node-indentation-level node)))
+         (level (wave-display-node-indentation-level node))
+         (wavelet-name (wave-display-blip-wavelet-name node)))
     (indent-to (* 2 level))
     (when (wave-display-blip-unreadp node)
       ;; This indicator is somewhat lame but demonstrates that we can
@@ -389,9 +392,8 @@
                     (insert "\n")
                     (setq current-paragraph-start (point)))
                    (w:image
-                    ;; TODO(ahyatt): Display inline image, if
-                    ;; possible
-                    (insert "[IMAGE]\n"))
+                    ;; Nothing to do
+                    )
                    (w:caption
                     ;; TODO(ahyatt) Format with caption face
                     )
@@ -417,9 +419,52 @@
                           (wave-display-handle-boundary begin (point)
                                                         key val))))))
               ((listp op)
-               (push (cons op (point)) op-stack))
-:              (t (message "Don't know how to deal with op: %s" op)))))
+               (push (cons op (point)) op-stack)
+               (case (first op)
+                 (w:image
+                  (cond ((not (display-images-p))
+                         (insert " [IMAGE (not supported on your emacs)]\n"))
+                        ((eql wave-client-connection-method 'websocket)
+                         (insert " [IMAGE (not supported with websocket)]\n"))
+                        (t
+                         (let* ((attachment-id (plist-get (second op)
+                                                          'attachment))
+                                (thumbnail (wave-display-get-thumbnail
+                                            (cdr wavelet-name)
+                                            attachment-id)))
+                           (if (null thumbnail)
+                               (insert " [IMAGE (failed to get thumbnail)]\n")
+                             (insert "\n"
+                                     (propertize
+                                      "[IMAGE]"
+                                      'display
+                                      `(image
+                                        ;; TODO(ohler): Make
+                                        ;; wave-display-get-thumbnail return the
+                                        ;; type as well as the data.  I've seen
+                                        ;; thumbnails that were jpgs, and perhaps
+                                        ;; other types occur as well.
+                                        :type png
+                                        :margin 2
+                                        :data ,thumbnail))
+                                     "\n"))))))))
+              (t (message "Don't know how to deal with op: %s" op)))))
     (insert "\n")))
+
+(defun wave-display-get-thumbnail (wavelet-id attachment-id)
+  (let ((attachment-info (gethash (cons wavelet-id attachment-id) wave-display-attachments)))
+    (if (null attachment-info)
+        (progn (warn "Attachment %S not found in wavelet %S" attachment-id wavelet-id)
+               nil)
+      (let ((url-suffix (plist-get (wave-attachment-info-plist attachment-info) 'thumbnail_url)))
+        (let ((url (let
+                       ;; TODO(ohler): solve this without rebinding this variable
+                       ((wave-client-server wave-client-attachment-server))
+                     (wave-client-get-url url-suffix))))
+          (let ((data (wave-client-curl url nil (wave-client-auth-cookies))))
+            (with-current-buffer data
+              (prog1 (buffer-string)
+                (kill-buffer)))))))))
 
 (defun wave-display-raw-doc (node)
   (let* ((raw-blip (wave-display-raw-doc-raw-blip node))
@@ -675,6 +720,43 @@ Returns the new buffer."
           (car (wave-display-blip-wavelet-name blip)))
     (wave-edit-mode)))
 
+(defstruct (wave-attachment-info (:constructor wave-make-attachment-info))
+  (id (assert nil))
+  (plist (assert nil)))
+
+(defun wave-display-collect-attachment-info (wavelet)
+  (let ((attachments (make-hash-table :test 'equal)))
+    (maphash (lambda (doc-id doc)
+               (when (string-match "\\`attach\\+\\(.*\\)\\'" (symbol-name doc-id))
+                 (let ((attachment-id (match-string 1 (symbol-name doc-id)))
+                       (accu (list))
+                       (op-stack '()))
+                   (dolist (op (wave-doc-content doc))
+                     (cond
+                      ((eq op 'end)
+                       (assert op-stack)
+                       (pop op-stack))
+                      ((stringp op)
+                       (error "Found text in attachment data doc %s: %S" doc-id op))
+                      (t
+                       (assert (listp op) t)
+                       (ecase (car op)
+                         (node
+                          (assert (null op-stack))
+                          (let ((key (plist-get (second op) 'key))
+                                (value (plist-get (second op) 'value)))
+                            (setq accu (list* (intern key) value accu)))
+                          (push (car op) op-stack))
+                         (@boundary
+                          (warn "Found annotations in attachment data doc %s, ignoring"
+                                doc-id))))))
+                   (puthash (cons (cdr (wave-wavelet-wavelet-name wavelet)) attachment-id)
+                            (wave-make-attachment-info :id attachment-id
+                                                       :plist accu)
+                            attachments))))
+             (wave-wavelet-docs wavelet))
+    attachments))
+
 (defun wave-display-refresh-buffer (wavelets)
   "Do the actual work of refreshing, given the data."
   (let ((inhibit-read-only t)
@@ -704,6 +786,10 @@ Returns the new buffer."
         ;; Then, populate read state.
         (dolist (wavelet user-wavelets)
           (wave-display-process-user-data wavelet))
+        ;; Then, collect attachment metadata.
+        (dolist (wavelet conv-wavelets)
+          (set (make-local-variable 'wave-display-attachments)
+               (wave-display-collect-attachment-info wavelet)))
         ;; Then, render conversations.
         (dolist (wavelet conv-wavelets)
           (wave-display-add-conversation ewoc wavelet))
