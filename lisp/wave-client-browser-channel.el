@@ -634,7 +634,7 @@ list of data pieces to post."
    :type-id (wave-bc-message-type 'remove-participant)
    :remove-participant
    (wave-remove-participant-proto :user-id
-                                  (wave-add-participant-address op))))
+                                  (wave-remove-participant-address op))))
 
 (defun wave-bc-blip-submit-to-proto (op)
   (wave-op-proto
